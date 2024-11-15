@@ -7,7 +7,14 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.11"
+pandas = "^2.2.3"
+databricks-sql-connector = "^3.6.0"
+hass-data-detective = "^3.0"
 
+
+[tool.poetry.group.test.dependencies]
+pytest = "^8.3.3"
+pylint = "^3.3.1"
 
 [build-system]
 requires = ["poetry-core"]
