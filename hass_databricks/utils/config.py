@@ -1,7 +1,5 @@
 """Config class for the project"""
 from typing import Dict, Any
-import os
-import json
 
 from hass_databricks.utils.validators import ConfigValidator
 
