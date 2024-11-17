@@ -27,12 +27,12 @@ class ConfigValidator(BaseModel):
     @classmethod
     def from_json(cls, config_file: str) -> Dict[str, Any]:
         """Load a JSON config file and return a validated config dict"""
-        with open(config_file, "r") as f:
+        with open(config_file, "r", encoding="utf-8") as f:
             config = json.load(f)
         try:
             return cls(**config).model_dump()
         except ValidationError as e:
-            raise ValueError(f"Invalid config file: {e}")
+            raise ValueError(f"Invalid config file: {e}") from e
 
     @classmethod
     def from_env(cls) -> Dict[str, Any]:
@@ -46,7 +46,7 @@ class ConfigValidator(BaseModel):
                 DBX_VOLUMES_PATH=os.environ["DBX_VOLUMES_PATH"]
             ).model_dump()
         except ValidationError as e:
-            raise ValueError(f"Invalid environment variables: {e}")
+            raise ValueError(f"Invalid environment variables: {e}") from e
 
     def get_config_as_dict(self) -> Dict[str, Any]:
         """Return the model as a dictionary"""

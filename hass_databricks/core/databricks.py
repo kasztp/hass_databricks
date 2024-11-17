@@ -7,65 +7,73 @@ from hass_databricks.utils.config import Config
 class DatabricksTarget:
     """Class to interact with Databricks."""
     def __init__(self, config: Config):
-        self._config = config
-        self._server_hostname            = os.getenv("DATABRICKS_SERVER_HOSTNAME"),
-        self._http_path                  = os.getenv("DATABRICKS_HTTP_PATH"),
-        self._access_token               = os.getenv("DATABRICKS_TOKEN"),
+        self._config                     = config
+        self._server_hostname            = os.getenv("DATABRICKS_SERVER_HOSTNAME")
+        self._http_path                  = os.getenv("DATABRICKS_HTTP_PATH")
+        self._access_token               = os.getenv("DATABRICKS_TOKEN")
         self._staging_allowed_local_path = config.local_path
         self._dbx_volumes_path           = config.dbx_path
 
     @property
     def server_hostname(self):
+        """Return the server hostname."""
         return self._server_hostname
-    
+
     @property
     def http_path(self):
+        """Return the HTTP path."""
         return self._http_path
-    
+
     @property
     def access_token(self):
+        """Return the access token."""
         return self._access_token
-    
+
     @property
     def staging_allowed_local_path(self):
+        """Return the staging allowed local path."""
         return self._staging_allowed_local_path
-    
-    @property.setter
+
+    @staging_allowed_local_path.setter
     def staging_allowed_local_path(self, value):
         self._staging_allowed_local_path = value
-    
+
     @property
     def dbx_volumes_path(self):
+        """Return the Databricks volumes path."""
         return self._dbx_volumes_path
-    
-    @property.setter
+
+    @dbx_volumes_path.setter
     def dbx_volumes_path(self, value):
         self._dbx_volumes_path = value
-    
+
     @property
     def catalog(self):
+        """Return the catalog."""
         return self._config.catalog
-    
-    @property.setter
+
+    @catalog.setter
     def catalog(self, value):
         self._config.catalog = value
-    
+
     @property
     def schema(self):
+        """Return the schema."""
         return self._config.schema
-    
-    @property.setter
+
+    @schema.setter
     def schema(self, value):
         self._config.schema = value
-    
+
     @property
     def table(self):
+        """Return the table."""
         return self._config.table
-    
-    @property.setter
+
+    @table.setter
     def table(self, value):
         self._config.table = value
-    
+
     def create_table(self):
         """Create a table for sensor data in Databricks."""
         with sql.connect(
@@ -90,8 +98,8 @@ class DatabricksTarget:
                 """
                 )
 
-                print(cursor.fetchall())
-    
+                return cursor.fetchall()
+
     def create_schema(self):
         """Create a schema for sensor data in Databricks."""
         with sql.connect(
@@ -110,8 +118,8 @@ class DatabricksTarget:
                 """
                 )
 
-                print(cursor.fetchall())
-    
+                return cursor.fetchall()
+
     def upload_to_databricks(self, input_full_path: str, filename: str):
         """Upload a file to Databricks."""
 
@@ -130,7 +138,7 @@ class DatabricksTarget:
                 f"PUT '{input_full_path}' INTO '{self.dbx_volumes_path}/{filename}' OVERWRITE"
                 )
 
-                print(cursor.fetchall())
+                return cursor.fetchall()
 
     def upsert_new_data(self, parquet_filename: str):
         """Upsert new data from a parquet file into the table."""
@@ -154,7 +162,10 @@ class DatabricksTarget:
                         entity_id
                     FROM read_files('{self.dbx_volumes_path}/{parquet_filename}')
                     ) AS source
-                    ON target.entity_id = source.entity_id AND target.last_updated_ts = source.last_updated_ts
+                    ON
+                        target.entity_id = source.entity_id
+                    AND
+                        target.last_updated_ts = source.last_updated_ts
                     WHEN MATCHED THEN
                     UPDATE SET 
                         target.state = source.state,
@@ -165,7 +176,7 @@ class DatabricksTarget:
                 """
                 )
 
-                print(cursor.fetchall())
+                return cursor.fetchall()
 
     def initial_load(self, parquet_filename: str):
         """Initial load from a parquet file into the table."""
@@ -194,4 +205,4 @@ class DatabricksTarget:
                 """
                 )
 
-                print(cursor.fetchall())
+                return cursor.fetchall()

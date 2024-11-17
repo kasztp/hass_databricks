@@ -53,4 +53,4 @@ jobs:
       - name: Run linter
         run: |
           source .venv/bin/activate
-          pylint ./hass_databricks --fail-under=8 | tee pylint.txt
+          pylint --fail-under=8 ./hass_databricks | tee pylint.txt
