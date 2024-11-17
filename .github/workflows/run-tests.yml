@@ -53,12 +53,17 @@ jobs:
       - name: Run tests
         run: |
           source .venv/bin/activate
-          pytest tests/ --cov=./hass_databricks --cov-config=./tests/.coveragerc --cov-report=xml
+          pytest tests/ --cov=./hass_databricks --cov-config=./tests/.coveragerc --cov-report=xml --junitxml=junit.xml -o junit_family=legacy
           coverage report
       #----------------------------------------------
       #              Upload coverage report
       #----------------------------------------------
       - name: Upload results to Codecov
         uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
