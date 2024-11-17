@@ -1,0 +1,7 @@
+{
+    "CATALOG": "catalog_name",
+    "SCHEMA": "schema_name",
+    "TABLE": "table_name",
+    "LOCAL_PATH": "/tmp/test/",
+    "DBX_VOLUMES_PATH": "valid_remote_path_in a Databricks volume"
+}
