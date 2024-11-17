@@ -53,4 +53,4 @@ jobs:
       - name: Run linter
         run: |
           source .venv/bin/activate
-          pylint --fail-under=8 `find -regextype egrep -regex '(.*.py)$'` | tee pylint.txt
+          pylint ./hass_databricks --fail-under=8 | tee pylint.txt
