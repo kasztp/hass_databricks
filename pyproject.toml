@@ -3,7 +3,7 @@ name = "hass-databricks"
 version = "0.1.0"
 description = ""
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.14.2,<4.0"
 authors = [ { name = "Peter Kaszt", email = "kasztp@gmail.com" } ]
 dependencies = [
 	"pandas>=2.2.3",
