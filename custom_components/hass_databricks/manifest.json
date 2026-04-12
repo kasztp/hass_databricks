@@ -1,0 +1,16 @@
+{
+  "domain": "hass_databricks",
+  "name": "HASS Databricks",
+  "version": "0.2.0",
+  "documentation": "https://github.com/kasztp/hass_databricks",
+  "issue_tracker": "https://github.com/kasztp/hass_databricks/issues",
+  "codeowners": [
+    "@kasztp"
+  ],
+  "config_flow": true,
+  "iot_class": "local_polling",
+  "requirements": [
+    "databricks-sql-connector>=3.6.0",
+    "pyarrow>=17.0.0"
+  ]
+}

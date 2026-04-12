@@ -1,0 +1,32 @@
+{
+  "sync": {
+    "name": "Sync Home Assistant data to Databricks",
+    "description": "Extract Home Assistant states to parquet and upsert into Databricks",
+    "fields": {
+      "catalog": {
+        "required": true,
+        "selector": {
+          "text": {}
+        }
+      },
+      "schema": {
+        "required": true,
+        "selector": {
+          "text": {}
+        }
+      },
+      "table": {
+        "required": true,
+        "selector": {
+          "text": {}
+        }
+      },
+      "dbx_volumes_path": {
+        "required": true,
+        "selector": {
+          "text": {}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,63 @@
+sync:
+  name: Sync Home Assistant data to Databricks
+  description: >
+    Extract states from Home Assistant SQLite DB, upload parquet to Databricks
+    volume, and MERGE into target table. All target fields default to the values
+    configured in the integration UI; supply them here only to override for a
+    one-off call.
+  fields:
+    catalog:
+      required: false
+      description: Override the catalog configured in the integration.
+      selector:
+        text:
+    schema:
+      required: false
+      description: Override the schema configured in the integration.
+      selector:
+        text:
+    table:
+      required: false
+      description: Override the table configured in the integration.
+      selector:
+        text:
+    dbx_volumes_path:
+      required: false
+      description: Override the Databricks Volumes path configured in the integration.
+      selector:
+        text:
+    local_path:
+      required: false
+      default: /tmp/
+      selector:
+        text:
+    db_path:
+      required: false
+      description: Override the HA SQLite database path (defaults to the active HA database).
+      selector:
+        text:
+    entity_like:
+      required: false
+      default: sensor.%
+      selector:
+        text:
+    chunk_size:
+      required: false
+      default: 50000
+      selector:
+        number:
+          min: 1000
+          max: 500000
+          mode: box
+    keep_local_file:
+      required: false
+      default: false
+      selector:
+        boolean:
+    hot_copy_db:
+      required: false
+      description: >
+        Override DB hot-copy behavior for this run. If omitted, initial runs use
+        hot copy while incremental runs read directly from the live DB.
+      selector:
+        boolean:

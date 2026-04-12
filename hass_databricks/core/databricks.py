@@ -1,16 +1,42 @@
 import os
+from typing import Protocol
 
 from databricks import sql
-from hass_databricks.utils.config import Config
+
+
+class SupportsDatabricksConfig(Protocol):
+    """Shape required by DatabricksTarget config consumers."""
+
+    @property
+    def catalog(self) -> str: ...
+
+    @property
+    def schema(self) -> str: ...
+
+    @property
+    def table(self) -> str: ...
+
+    @property
+    def local_path(self) -> str: ...
+
+    @property
+    def dbx_path(self) -> str: ...
 
 
 class DatabricksTarget:
     """Class to interact with Databricks."""
-    def __init__(self, config: Config):
+    def __init__(
+        self,
+        config: SupportsDatabricksConfig,
+        *,
+        server_hostname: str | None = None,
+        http_path: str | None = None,
+        access_token: str | None = None,
+    ):
         self._config                     = config
-        self._server_hostname            = os.getenv("DATABRICKS_SERVER_HOSTNAME")
-        self._http_path                  = os.getenv("DATABRICKS_HTTP_PATH")
-        self._access_token               = os.getenv("DATABRICKS_TOKEN")
+        self._server_hostname            = server_hostname or os.getenv("DATABRICKS_SERVER_HOSTNAME")
+        self._http_path                  = http_path or os.getenv("DATABRICKS_HTTP_PATH")
+        self._access_token               = access_token or os.getenv("DATABRICKS_TOKEN")
         self._staging_allowed_local_path = config.local_path
         self._dbx_volumes_path           = config.dbx_path
 
@@ -52,27 +78,15 @@ class DatabricksTarget:
         """Return the catalog."""
         return self._config.catalog
 
-    @catalog.setter
-    def catalog(self, value):
-        self._config.catalog = value
-
     @property
     def schema(self):
         """Return the schema."""
         return self._config.schema
 
-    @schema.setter
-    def schema(self, value):
-        self._config.schema = value
-
     @property
     def table(self):
         """Return the table."""
         return self._config.table
-
-    @table.setter
-    def table(self, value):
-        self._config.table = value
 
     def create_table(self):
         """Create a table for sensor data in Databricks."""

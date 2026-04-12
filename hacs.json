@@ -1,0 +1,9 @@
+{
+  "name": "HASS Databricks",
+  "content_in_root": false,
+  "domains": [
+    "hass_databricks"
+  ],
+  "homeassistant": "2024.1.0",
+  "render_readme": true
+}

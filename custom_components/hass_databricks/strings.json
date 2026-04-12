@@ -1,0 +1,48 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Databricks",
+        "data": {
+          "server_hostname": "Server Hostname",
+          "http_path": "HTTP Path",
+          "access_token": "Access Token",
+          "catalog": "Catalog",
+          "schema": "Schema",
+          "table": "Table",
+          "dbx_volumes_path": "Databricks Volumes Path"
+        },
+        "data_description": {
+          "server_hostname": "Databricks workspace hostname, e.g. adb-xxxx.azuredatabricks.net",
+          "http_path": "SQL warehouse HTTP path, e.g. /sql/1.0/warehouses/xxxx",
+          "access_token": "Databricks personal access token",
+          "dbx_volumes_path": "Target path in Databricks Volumes used for parquet staging, e.g. /Volumes/catalog/schema/volume/"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This Databricks target is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Sync Options",
+        "data": {
+          "entity_like": "Entity Filter",
+          "chunk_size": "Chunk Size",
+          "keep_local_file": "Keep Local Parquet File After Upload",
+          "local_path": "Local Staging Path",
+          "auto_sync_enabled": "Enable Automatic Periodic Sync",
+          "auto_sync_interval_minutes": "Automatic Sync Interval (minutes)"
+        },
+        "data_description": {
+          "entity_like": "SQL LIKE pattern to filter entities, e.g. sensor.%",
+          "chunk_size": "Number of rows per extraction chunk (1 000 – 500 000)",
+          "local_path": "Local directory used for temporary parquet staging",
+          "auto_sync_interval_minutes": "How often the integration triggers sync automatically"
+        }
+      }
+    }
+  }
+}

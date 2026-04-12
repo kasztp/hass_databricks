@@ -15,15 +15,30 @@ class Config:
         """Return the catalog name"""
         return self._config.get("CATALOG")
 
+    @catalog.setter
+    def catalog(self, value: str) -> None:
+        """Set the catalog name."""
+        self._config["CATALOG"] = value
+
     @property
     def schema(self) -> str:
         """Return the schema name"""
         return self._config.get("SCHEMA")
 
+    @schema.setter
+    def schema(self, value: str) -> None:
+        """Set the schema name."""
+        self._config["SCHEMA"] = value
+
     @property
     def table(self) -> str:
         """Return the table name"""
         return self._config.get("TABLE")
+
+    @table.setter
+    def table(self, value: str) -> None:
+        """Set the table name."""
+        self._config["TABLE"] = value
 
     @property
     def local_path(self) -> str:
