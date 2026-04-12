@@ -1,5 +1,7 @@
 # hass_databricks
 
+![HASS Databricks](custom_components/hass_databricks/brand/logo.png)
+
 Tools to sync Home Assistant state history to Databricks as a Home Assistant custom integration.
 
 ## Home Assistant Custom Component
@@ -18,6 +20,59 @@ Key files:
 HACS metadata is provided in:
 
 - hacs.json
+
+## Installation
+
+### Via HACS (Home Assistant Community Store)
+
+1. Navigate to **Settings** → **Devices & Services** → **Custom Repositories**
+2. Add repository URL: `https://github.com/kasztp/hass_databricks`
+3. Select category: **Integration**
+4. Click **Create Repository**
+5. Go to **HACS** → **Integrations** → Search for "HASS Databricks"
+6. Click **Install**
+7. Restart Home Assistant
+
+### Manual Installation
+
+1. Download the repository: `git clone https://github.com/kasztp/hass_databricks`
+2. Copy `custom_components/hass_databricks/` to `<config>/custom_components/`
+3. Restart Home Assistant
+
+## Configuration
+
+### Setup via Home Assistant UI
+
+1. Go to **Settings** → **Devices & Services**
+2. Click **Add Integration**
+3. Search for **HASS Databricks**
+4. Fill in the required connection parameters
+
+### Configuration Parameters
+
+**Required (Initial Setup):**
+- **Server Hostname**: Databricks workspace hostname (e.g., `adb-xxxx.azuredatabricks.net`)
+- **HTTP Path**: SQL warehouse HTTP path (e.g., `/sql/1.0/warehouses/xxxx`)
+- **Access Token**: Databricks personal access token (create in Databricks workspace)
+- **Catalog**: Target Databricks catalog name (e.g., `main`)
+- **Schema**: Target schema in the catalog (e.g., `ha`)
+- **Table**: Target table for synced data (e.g., `sensor_states`)
+- **Databricks Volumes Path**: Staging path for parquet files (e.g., `/Volumes/main/ha/ingest`)
+
+**Optional (Adjustable in Integration Options):**
+- **Entity Filter** (default: `sensor.%`): SQL LIKE pattern to filter entities (e.g., `sensor.%`, `climate.%`, `%temperature%`)
+- **Chunk Size** (default: `50000`): Number of rows extracted per batch (1,000–500,000)
+- **Keep Local File** (default: `false`): Retain local parquet file after upload for debugging
+- **Local Staging Path** (default: `/tmp/`): Directory for temporary parquet staging
+- **Enable Automatic Sync** (default: `true`): Schedule periodic syncs
+- **Sync Interval** (default: `60` minutes): How often automatic syncs run (1–1440 minutes)
+
+### Environment Variables
+
+Databricks credentials can also be read from environment variables (if not configured via UI):
+- `DATABRICKS_SERVER_HOSTNAME`
+- `DATABRICKS_HTTP_PATH`
+- `DATABRICKS_TOKEN`
 
 ## What The Sync Service Does
 
@@ -83,6 +138,10 @@ Each sync run records:
 
 The integration writes run results to the Home Assistant Logbook (Activity view) using the name `HASS Databricks`.
 
+Availability is also logged:
+- When a sync fails, a warning is logged once (repeated failures do not spam logs)
+- When the service reconnects after a failure, an info message is logged
+
 ### Event Bus
 
 The integration fires event `hass_databricks_sync_result` on each run with run metadata.
@@ -91,11 +150,35 @@ The integration fires event `hass_databricks_sync_result` on each run with run m
 
 The integration exposes the following entities:
 
-- `sensor.hass_databricks_last_run`
-- `sensor.hass_databricks_last_rows`
-- `sensor.hass_databricks_last_success`
+- `sensor.hass_databricks_last_run`: Last sync status with attributes (target, rows, error, since)
+- `sensor.hass_databricks_last_rows`: Number of rows in the last successful sync
+- `sensor.hass_databricks_last_success`: Timestamp of the last successful sync
 
-`sensor.hass_databricks_last_run` includes extra attributes such as `last_target`, `last_trigger`, `last_error`, and incremental `last_since` watermark.
+Sensors are marked unavailable if the most recent sync failed (reconnect when sync succeeds).
+
+## Removal
+
+To remove the integration:
+
+1. Go to **Settings** → **Devices & Services**
+2. Find **HASS Databricks** in the list
+3. Click the three dots menu → **Delete**
+4. Confirm deletion
+
+If installed via HACS, also uninstall from **HACS** → **Integrations** → **HASS Databricks** → **Uninstall**.
+
+If manually installed, remove the directory `<config>/custom_components/hass_databricks/` and restart Home Assistant.
+
+## Troubleshooting
+
+**Symptoms: Sensors show unavailable**
+- **Cause**: Most recent sync failed
+- **Solution**: Check Home Assistant logs for error details. Common causes: invalid credentials, unreachable Databricks server, missing database file
+- **Recovery**: Fix the underlying issue and trigger a manual sync via the service or wait for the next automatic sync. Sensors will become available upon success.
+
+**Symptoms: "Sync dependencies unavailable"**
+- **Cause**: Integration dependencies not installed
+- **Solution**: Ensure the Home Assistant container includes Python dependencies. Rebuild the Docker image with `requirements.txt` or install via `pip install databricks-sql-connector pyarrow`
 
 ## CI / Validation
 

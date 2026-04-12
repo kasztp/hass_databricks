@@ -43,3 +43,10 @@ DEFAULT_CHUNK_SIZE = 50_000
 DEFAULT_LOCAL_PATH = "/tmp/"
 DEFAULT_AUTO_SYNC_ENABLED = True
 DEFAULT_AUTO_SYNC_INTERVAL_MINUTES = 60
+
+# Parallel updates
+PARALLEL_UPDATES = 1
+
+# Availability tracking (stored in sync_meta)
+SYNC_META_AVAILABLE = "available"
+SYNC_META_LAST_UNAVAILABLE_LOG = "last_unavailable_log_ts"

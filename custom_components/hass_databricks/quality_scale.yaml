@@ -1,0 +1,143 @@
+rules:
+  # Bronze
+  action-setup:
+    status: todo
+    comment: >
+      Service actions are registered in async_setup_entry rather than at the
+      integration-level async_setup, so they are re-registered on every entry
+      reload. Needs refactoring to register once in async_setup.
+  appropriate-polling: done
+  brands: done
+  common-modules: done
+  config-flow-test-coverage: done
+  config-flow: done
+  dependency-transparency: done
+  docs-actions: done
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions:
+    status: todo
+    comment: README does not yet include a section on removing the integration.
+  entity-event-setup: done
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data:
+    status: todo
+    comment: >
+      Integration currently stores runtime state in hass.data[DOMAIN] instead
+      of ConfigEntry.runtime_data as required by modern HA guidelines.
+  test-before-configure:
+    status: todo
+    comment: >
+      Config flow does not attempt a test connection to Databricks before
+      creating the entry. A validation step should be added.
+  test-before-setup:
+    status: todo
+    comment: >
+      async_setup_entry does not verify connectivity to Databricks before
+      completing setup; failed connections are only detected at first sync.
+  unique-config-entry: done
+
+  # Silver
+  action-exceptions: done
+  config-entry-unloading: done
+  docs-configuration-parameters: done
+  docs-installation-parameters: done
+  entity-unavailable: done
+  integration-owner: done
+  log-when-unavailable: done
+  parallel-updates: done
+  reauthentication-flow: done
+  test-coverage: done
+
+  # Gold
+  devices:
+    status: todo
+    comment: Integration does not register devices in the device registry.
+  diagnostics:
+    status: todo
+    comment: No diagnostics download support implemented.
+  discovery-update-info:
+    status: exempt
+    comment: >
+      Service-based integration; there are no discoverable network devices
+      whose network information needs to be updated.
+  discovery:
+    status: exempt
+    comment: >
+      Databricks workspace is a cloud service configured by the user; automatic
+      discovery is not applicable.
+  docs-data-update: done
+  docs-examples:
+    status: todo
+    comment: >
+      README includes a basic service-call YAML snippet but lacks automation
+      and dashboard examples.
+  docs-known-limitations:
+    status: todo
+    comment: README does not include a known limitations section.
+  docs-supported-devices:
+    status: exempt
+    comment: Integration does not interact with hardware devices.
+  docs-supported-functions:
+    status: todo
+    comment: >
+      README does not have a dedicated section listing all provided entities and
+      their meanings.
+  docs-troubleshooting:
+    status: todo
+    comment: README does not include a troubleshooting section.
+  docs-use-cases:
+    status: todo
+    comment: >
+      README explains what the sync does technically but lacks HA-automation
+      use-case examples.
+  dynamic-devices:
+    status: exempt
+    comment: No device registry entries are created.
+  entity-category:
+    status: todo
+    comment: Sensor entities are not assigned an EntityCategory.
+  entity-device-class:
+    status: todo
+    comment: >
+      Only the last-success sensor uses SensorDeviceClass.TIMESTAMP; last-run
+      and last-rows sensors lack an appropriate device class.
+  entity-disabled-by-default:
+    status: todo
+    comment: No entities are disabled by default; noisy/diagnostic sensors should be.
+  entity-translations:
+    status: todo
+    comment: >
+      Sensor names are set via _attr_name string literals instead of
+      translation keys in strings.json / translations/*.json.
+  exception-translations:
+    status: todo
+    comment: Exception messages are plain strings, not translatable keys.
+  icon-translations:
+    status: todo
+    comment: Icons are set via hard-coded _attr_icon strings, not icon translation files.
+  reconfiguration-flow:
+    status: todo
+    comment: No async_step_reconfigure implemented in the config flow.
+  repair-issues:
+    status: todo
+    comment: No HA repair issues or repair flows are used.
+  stale-devices:
+    status: exempt
+    comment: No device registry entries are created.
+
+  # Platinum
+  async-dependency:
+    status: todo
+    comment: >
+      databricks-sql-connector is a synchronous library; calls are currently
+      wrapped in async_add_executor_job but the dependency itself is not async.
+  inject-websession:
+    status: exempt
+    comment: >
+      The integration uses a SQL connector, not an HTTP client library, so
+      injecting a Home Assistant websession is not applicable.
+  strict-typing:
+    status: todo
+    comment: Codebase has type hints but is not enforced with strict mypy / pylance settings.

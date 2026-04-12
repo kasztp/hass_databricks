@@ -16,11 +16,13 @@ from hass_databricks.utils.config import Config
 
 CHUNK_SIZE = 50_000
 
-PARQUET_SCHEMA = pa.schema([
-    ("state", pa.string()),
-    ("last_updated_ts", pa.float64()),
-    ("entity_id", pa.string()),
-])
+PARQUET_SCHEMA = pa.schema(
+    [
+        ("state", pa.string()),
+        ("last_updated_ts", pa.float64()),
+        ("entity_id", pa.string()),
+    ]
+)
 
 
 @dataclass
@@ -196,9 +198,8 @@ def create_data_pack(configuration: Config) -> Tuple[str, str]:
 
 
 def create_incremental_data_pack(
-        configuration: Config,
-        last_update_time: Optional[str]
-    ) -> Tuple[str, str]:
+    configuration: Config, last_update_time: Optional[str]
+) -> Tuple[str, str]:
     """Create an incremental data pack for upload to Databricks.
 
     Args:
@@ -219,8 +220,7 @@ def create_incremental_data_pack(
         start_state_id = int(last_update_time)
     else:
         existing_data_packs = [
-            f for f in os.listdir(configuration.local_path)
-            if f.endswith(".parquet")
+            f for f in os.listdir(configuration.local_path) if f.endswith(".parquet")
         ]
         if existing_data_packs:
             latest_data_pack = max(existing_data_packs, key=os.path.getctime)
@@ -249,24 +249,26 @@ if __name__ == "__main__":
     # Parse the command line arguments
     parser = ArgumentParser()
     parser.add_argument(
-        "-c", "--config",
-        type=str, default="config.json",
-        help="The path to the config file (default: config.json)."
-    )
-    parser.add_argument(
-        "-i", "--incremental",
-        action="store_true",
-        help="Create an incremental data pack."
-    )
-    parser.add_argument(
-        "-k", "--keep_last",
-        action="store_true",
-        help="Keep the last data pack."
-    )
-    parser.add_argument(
-        "-l", "--last_update_time",
+        "-c",
+        "--config",
         type=str,
-        help="The last update time in '%Y-%m-%d-%H-%M-%S' format."
+        default="config.json",
+        help="The path to the config file (default: config.json).",
+    )
+    parser.add_argument(
+        "-i",
+        "--incremental",
+        action="store_true",
+        help="Create an incremental data pack.",
+    )
+    parser.add_argument(
+        "-k", "--keep_last", action="store_true", help="Keep the last data pack."
+    )
+    parser.add_argument(
+        "-l",
+        "--last_update_time",
+        type=str,
+        help="The last update time in '%Y-%m-%d-%H-%M-%S' format.",
     )
     args = parser.parse_args()
 
@@ -276,9 +278,8 @@ if __name__ == "__main__":
     # Create a data pack
     if args.incremental:
         file_path, filename = create_incremental_data_pack(
-                                        config,
-                                        args.last_update_time
-                                    )
+            config, args.last_update_time
+        )
     else:
         file_path, filename = create_data_pack(config)
 

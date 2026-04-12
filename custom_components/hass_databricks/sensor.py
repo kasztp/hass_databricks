@@ -13,6 +13,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import (
     DOMAIN,
     EVENT_SYNC_RESULT,
+    PARALLEL_UPDATES,
     SYNC_META_LAST_ERROR,
     SYNC_META_LAST_FILENAME,
     SYNC_META_LAST_ROWS,
@@ -31,7 +32,7 @@ def _iso_from_ts(value: Any) -> str | None:
         return None
     try:
         return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -53,9 +54,13 @@ async def async_setup_entry(
 class HassDatabricksBaseSensor(SensorEntity):
     """Base class that refreshes from sync metadata and listens for updates."""
 
+    _attr_has_entity_name = True
+    _attr_parallel_updates = PARALLEL_UPDATES
+
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass = hass
         self._entry = entry
+        self._attr_available = True
 
     @property
     def sync_meta(self) -> dict[str, Any]:
@@ -73,6 +78,7 @@ class HassDatabricksBaseSensor(SensorEntity):
         """Handle integration sync event and update state."""
         if event.data.get("entry_id") != self._entry.entry_id:
             return
+        self._attr_available = event.data.get("success", True)
         self._refresh_from_meta()
         self.async_write_ha_state()
 
@@ -88,7 +94,7 @@ class HassDatabricksLastRunSensor(HassDatabricksBaseSensor):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(hass, entry)
         self._attr_unique_id = f"{entry.entry_id}_last_run"
-        self._attr_name = "HASS Databricks Last Run"
+        self._attr_name = "Last Run"
         self._attr_native_value = "never"
         self._attr_extra_state_attributes = {}
         self._refresh_from_meta()
@@ -117,7 +123,7 @@ class HassDatabricksLastRowsSensor(HassDatabricksBaseSensor):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(hass, entry)
         self._attr_unique_id = f"{entry.entry_id}_last_rows"
-        self._attr_name = "HASS Databricks Last Rows"
+        self._attr_name = "Last Rows"
         self._attr_native_value = None
         self._refresh_from_meta()
 
@@ -136,7 +142,7 @@ class HassDatabricksLastSuccessSensor(HassDatabricksBaseSensor):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(hass, entry)
         self._attr_unique_id = f"{entry.entry_id}_last_success"
-        self._attr_name = "HASS Databricks Last Success"
+        self._attr_name = "Last Success"
         self._attr_native_value = None
         self._refresh_from_meta()
 

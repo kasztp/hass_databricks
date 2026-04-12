@@ -41,15 +41,20 @@ STEP_USER_SCHEMA = vol.Schema(
     }
 )
 
+STEP_REAUTH_CONFIRM_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_ACCESS_TOKEN): str,
+    }
+)
+
 
 class HassDataBricksConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle the initial configuration for hass_databricks."""
 
     VERSION = 1
+    _reauth_entry: config_entries.ConfigEntry | None = None
 
-    async def async_step_user(
-        self, user_input: dict | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_user(self, user_input: dict | None = None) -> ConfigFlowResult:
         """Handle the user step."""
         if user_input is not None:
             await self.async_set_unique_id(
@@ -78,13 +83,34 @@ class HassDataBricksConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Return the options flow handler."""
         return HassDataBricksOptionsFlow(config_entry)
 
+    async def async_step_reauth(self, entry_data: dict) -> ConfigFlowResult:
+        """Start reauthentication flow."""
+        entry_id = self.context.get("entry_id")
+        if entry_id is None:
+            return self.async_abort(reason="unknown")
+        self._reauth_entry = self.hass.config_entries.async_get_entry(entry_id)
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict | None = None
+    ) -> ConfigFlowResult:
+        """Confirm and store a new access token for reauthentication."""
+        if user_input is not None and self._reauth_entry is not None:
+            return self.async_update_reload_and_abort(
+                self._reauth_entry,
+                data_updates={CONF_ACCESS_TOKEN: user_input[CONF_ACCESS_TOKEN]},
+            )
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=STEP_REAUTH_CONFIRM_SCHEMA,
+        )
+
 
 class HassDataBricksOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
     """Handle option updates for hass_databricks."""
 
-    async def async_step_init(
-        self, user_input: dict | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_init(self, user_input: dict | None = None) -> ConfigFlowResult:
         """Handle options form."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)

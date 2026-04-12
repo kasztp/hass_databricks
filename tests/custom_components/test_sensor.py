@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from typing import cast
+import asyncio
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -20,6 +21,7 @@ from custom_components.hass_databricks.sensor import (
     HassDatabricksLastRowsSensor,
     HassDatabricksLastRunSensor,
     HassDatabricksLastSuccessSensor,
+    async_setup_entry,
     _iso_from_ts,
 )
 
@@ -87,3 +89,86 @@ def test_last_rows_and_last_success_sensors_refresh_from_meta():
 
     assert rows_sensor.native_value == 9
     assert success_sensor.native_value is not None
+
+
+def test_sensor_availability_toggles_from_sync_event():
+    meta = {
+        SYNC_META_LAST_STATUS: "success",
+        SYNC_META_LAST_ROWS: 1,
+    }
+    hass = _hass_with_meta(meta)
+    entry = _entry("entry-1")
+    sensor = HassDatabricksLastRunSensor(hass, entry)
+    sensor.async_write_ha_state = lambda: None
+
+    sensor._handle_sync_event(
+        SimpleNamespace(data={"entry_id": "entry-1", "success": False})
+    )
+    assert sensor.available is False
+
+    sensor._handle_sync_event(
+        SimpleNamespace(data={"entry_id": "entry-1", "success": True})
+    )
+    assert sensor.available is True
+
+
+def test_sensor_has_entity_name_enabled():
+    meta = {SYNC_META_LAST_STATUS: "never"}
+    hass = _hass_with_meta(meta)
+    entry = _entry("entry-1")
+    sensor = HassDatabricksLastRowsSensor(hass, entry)
+
+    assert sensor.has_entity_name is True
+
+
+def test_async_setup_entry_adds_three_entities():
+    hass = _hass_with_meta({})
+    entry = _entry("entry-1")
+    added = []
+
+    asyncio.run(async_setup_entry(hass, entry, lambda entities: added.extend(entities)))
+
+    assert len(added) == 3
+
+
+def test_added_to_hass_registers_event_listener():
+    remove_callbacks = []
+
+    hass = cast(
+        HomeAssistant,
+        SimpleNamespace(
+            data={DOMAIN: {"entry-1": {"sync_meta": {}}}},
+            bus=SimpleNamespace(async_listen=lambda *_: lambda: None),
+        ),
+    )
+    entry = _entry("entry-1")
+    sensor = HassDatabricksLastRunSensor(hass, entry)
+    sensor.async_on_remove = lambda cb: remove_callbacks.append(cb)
+
+    asyncio.run(sensor.async_added_to_hass())
+
+    assert len(remove_callbacks) == 1
+
+
+def test_handle_sync_event_ignores_other_entry_ids():
+    meta = {SYNC_META_LAST_STATUS: "success"}
+    hass = _hass_with_meta(meta)
+    entry = _entry("entry-1")
+    sensor = HassDatabricksLastRunSensor(hass, entry)
+    sensor.async_write_ha_state = lambda: None
+
+    sensor._handle_sync_event(
+        SimpleNamespace(data={"entry_id": "other", "success": False})
+    )
+
+    assert sensor.available is True
+
+
+def test_last_success_sensor_none_when_missing_timestamp():
+    meta = {}
+    hass = _hass_with_meta(meta)
+    entry = _entry("entry-1")
+
+    sensor = HassDatabricksLastSuccessSensor(hass, entry)
+
+    assert sensor.native_value is None

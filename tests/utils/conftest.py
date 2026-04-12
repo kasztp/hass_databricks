@@ -1,4 +1,3 @@
-
 import json
 import os
 from unittest.mock import patch, mock_open
@@ -14,7 +13,7 @@ def good_config():
         "SCHEMA": "schema_name",
         "TABLE": "table_name",
         "LOCAL_PATH": "valid_local_path",
-        "DBX_VOLUMES_PATH": "valid_remote_path_in a Databricks volume"
+        "DBX_VOLUMES_PATH": "valid_remote_path_in a Databricks volume",
     }
     with patch("builtins.open", mock_open(read_data=json.dumps(config))):
         yield

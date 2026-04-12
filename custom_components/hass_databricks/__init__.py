@@ -6,7 +6,7 @@ from datetime import timedelta
 import logging
 import time
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, SOURCE_REAUTH
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_track_time_interval
@@ -39,12 +39,14 @@ from .const import (
     DOMAIN,
     EVENT_SYNC_RESULT,
     SERVICE_SYNC,
+    SYNC_META_AVAILABLE,
     SYNC_META_LAST_ERROR,
     SYNC_META_LAST_FILENAME,
     SYNC_META_LAST_ROWS,
     SYNC_META_LAST_RUN_TS,
     SYNC_META_LAST_SINCE_TS,
     SYNC_META_LAST_STATUS,
+    SYNC_META_LAST_UNAVAILABLE_LOG,
     STORAGE_KEY_PREFIX,
     STORAGE_VERSION,
     SYNC_META_LAST_SUCCESS_TS,
@@ -82,6 +84,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         error: str | None = None,
     ) -> None:
         """Record one sync run for Activity/Logbook and automations."""
+        sync_meta = hass.data[DOMAIN][entry.entry_id]["sync_meta"]
+
+        # Log once when service becomes unavailable
+        if not success:
+            was_available = sync_meta.get(SYNC_META_AVAILABLE, True)
+            if was_available:
+                _LOGGER.warning(
+                    "hass_databricks sync unavailable: %s", error or "unknown error"
+                )
+                sync_meta[SYNC_META_AVAILABLE] = False
+                sync_meta[SYNC_META_LAST_UNAVAILABLE_LOG] = run_ts
+        else:
+            was_available = sync_meta.get(SYNC_META_AVAILABLE, True)
+            if not was_available:
+                _LOGGER.info("hass_databricks sync reconnected and operational")
+                sync_meta[SYNC_META_AVAILABLE] = True
+
         if success:
             message = f"Sync succeeded ({rows} rows) -> {target}"
             if filename:
@@ -172,10 +191,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         target = f"{request.catalog}.{request.schema}.{request.table}"
         run_ts = time.time()
 
+        async def _start_reauth_if_needed(err: Exception) -> None:
+            """Trigger reauthentication flow on auth-related failures."""
+            err_text = str(err).lower()
+            auth_markers = ("auth", "token", "unauthorized", "forbidden", "401")
+            if not any(marker in err_text for marker in auth_markers):
+                return
+            await hass.config_entries.flow.async_init(
+                DOMAIN,
+                context={"source": SOURCE_REAUTH, "entry_id": entry.entry_id},
+                data={
+                    CONF_SERVER_HOSTNAME: data[CONF_SERVER_HOSTNAME],
+                    CONF_HTTP_PATH: data[CONF_HTTP_PATH],
+                },
+            )
+
         _LOGGER.info("Starting hass_databricks sync service")
         try:
             result = await hass.async_add_executor_job(run_sync_pipeline, request)
         except Exception as err:
+            try:
+                await _start_reauth_if_needed(err)
+            except Exception:
+                _LOGGER.debug("Failed to start reauthentication flow", exc_info=True)
             sync_meta = hass.data[DOMAIN][entry.entry_id]["sync_meta"]
             sync_meta[SYNC_META_LAST_RUN_TS] = run_ts
             sync_meta[SYNC_META_LAST_STATUS] = "failed"
@@ -248,7 +286,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             except Exception:
                 _LOGGER.exception("Unexpected scheduled hass_databricks sync failure")
 
-        unsub_auto_sync = async_track_time_interval(hass, _handle_scheduled_sync, interval)
+        unsub_auto_sync = async_track_time_interval(
+            hass, _handle_scheduled_sync, interval
+        )
         hass.data[DOMAIN][entry.entry_id]["unsub_auto_sync"] = unsub_auto_sync
         _LOGGER.debug(
             "Automatic sync enabled for %s every %s minutes",

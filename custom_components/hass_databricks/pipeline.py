@@ -198,7 +198,9 @@ def _extract_states_to_parquet(
         connection = sqlite3.connect(f"file:{read_db_path}?mode=ro", uri=True)
         try:
             cursor = connection.cursor()
-            cursor.execute(query, (last_state_id, effective_min_ts, entity_like, chunk_size))
+            cursor.execute(
+                query, (last_state_id, effective_min_ts, entity_like, chunk_size)
+            )
             while True:
                 rows = cursor.fetchmany(chunk_size)
                 if not rows:

@@ -1,4 +1,5 @@
 """Validate config files and environment variables"""
+
 import json
 import os
 from typing import Any, Dict
@@ -7,9 +8,9 @@ from pydantic import BaseModel, ValidationError
 
 class ConfigValidator(BaseModel):
     """Config validation class.
-    
+
     A config should be a valid JSON file with the following structure:
-    
+
     {
         "CATALOG": "catalog_name",
         "SCHEMA": "schema_name",
@@ -18,6 +19,7 @@ class ConfigValidator(BaseModel):
         "DBX_VOLUMES_PATH": "valid_remote_path_in a Databricks volume"
     }
     """
+
     CATALOG: str
     SCHEMA: str
     TABLE: str
@@ -43,7 +45,7 @@ class ConfigValidator(BaseModel):
                 SCHEMA=os.environ["SCHEMA"],
                 TABLE=os.environ["TABLE"],
                 LOCAL_PATH=os.environ["LOCAL_PATH"],
-                DBX_VOLUMES_PATH=os.environ["DBX_VOLUMES_PATH"]
+                DBX_VOLUMES_PATH=os.environ["DBX_VOLUMES_PATH"],
             ).model_dump()
         except ValidationError as e:
             raise ValueError(f"Invalid environment variables: {e}") from e

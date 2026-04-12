@@ -1,4 +1,5 @@
 """Tests for the validators module."""
+
 import json
 import os
 from unittest.mock import patch, mock_open
@@ -26,7 +27,7 @@ def test_config_validator_from_json_missing_key_in_config():
         "CATALOG": "catalog_name",
         "SCHEMA": "schema_name",
         "TABLE": "table_name",
-        "LOCAL_PATH": "valid_local_path"
+        "LOCAL_PATH": "valid_local_path",
     }
     with patch("builtins.open", mock_open(read_data=json.dumps(config))):
         with pytest.raises(ValueError):
@@ -40,7 +41,7 @@ def test_config_validator_from_json_bad_config():
         "SCHEMA": "schema_name",
         "TABLE": "table_name",
         "LOCAL_PATH": "valid_local_path",
-        "INVALID_KEY": "invalid_value"
+        "INVALID_KEY": "invalid_value",
     }
     with patch("builtins.open", mock_open(read_data=json.dumps(config))):
         with pytest.raises(ValueError):
@@ -95,7 +96,7 @@ def test_config_validator_get_config_as_dict():
         "SCHEMA": "schema_name",
         "TABLE": "table_name",
         "LOCAL_PATH": "valid_local_path",
-        "DBX_VOLUMES_PATH": "valid_remote_path_in a Databricks volume"
+        "DBX_VOLUMES_PATH": "valid_remote_path_in a Databricks volume",
     }
     c = ConfigValidator(**config)
     assert c.get_config_as_dict() == config

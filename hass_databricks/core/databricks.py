@@ -25,6 +25,7 @@ class SupportsDatabricksConfig(Protocol):
 
 class DatabricksTarget:
     """Class to interact with Databricks."""
+
     def __init__(
         self,
         config: SupportsDatabricksConfig,
@@ -33,12 +34,14 @@ class DatabricksTarget:
         http_path: str | None = None,
         access_token: str | None = None,
     ):
-        self._config                     = config
-        self._server_hostname            = server_hostname or os.getenv("DATABRICKS_SERVER_HOSTNAME")
-        self._http_path                  = http_path or os.getenv("DATABRICKS_HTTP_PATH")
-        self._access_token               = access_token or os.getenv("DATABRICKS_TOKEN")
+        self._config = config
+        self._server_hostname = server_hostname or os.getenv(
+            "DATABRICKS_SERVER_HOSTNAME"
+        )
+        self._http_path = http_path or os.getenv("DATABRICKS_HTTP_PATH")
+        self._access_token = access_token or os.getenv("DATABRICKS_TOKEN")
         self._staging_allowed_local_path = config.local_path
-        self._dbx_volumes_path           = config.dbx_path
+        self._dbx_volumes_path = config.dbx_path
 
     @property
     def server_hostname(self):
@@ -91,17 +94,15 @@ class DatabricksTarget:
     def create_table(self):
         """Create a table for sensor data in Databricks."""
         with sql.connect(
-            server_hostname            = self.server_hostname,
-            http_path                  = self.http_path,
-            access_token               = self.access_token,
-            staging_allowed_local_path = self.staging_allowed_local_path
+            server_hostname=self.server_hostname,
+            http_path=self.http_path,
+            access_token=self.access_token,
+            staging_allowed_local_path=self.staging_allowed_local_path,
         ) as connection:
-
             with connection.cursor() as cursor:
-
                 # Create a table in the specified catalog and schema.
                 cursor.execute(
-                f"""
+                    f"""
                 CREATE TABLE IF NOT EXISTS `{self.catalog}`.`{self.schema}`.`{self.table}` (
                     state FLOAT,
                     last_updated_ts TIMESTAMP,
@@ -117,17 +118,15 @@ class DatabricksTarget:
     def create_schema(self):
         """Create a schema for sensor data in Databricks."""
         with sql.connect(
-            server_hostname            = self.server_hostname,
-            http_path                  = self.http_path,
-            access_token               = self.access_token,
-            staging_allowed_local_path = self.staging_allowed_local_path
+            server_hostname=self.server_hostname,
+            http_path=self.http_path,
+            access_token=self.access_token,
+            staging_allowed_local_path=self.staging_allowed_local_path,
         ) as connection:
-
             with connection.cursor() as cursor:
-
                 # Create a schema in the specified catalog.
                 cursor.execute(
-                f"""
+                    f"""
                 CREATE SCHEMA IF NOT EXISTS `{self.catalog}`.`{self.schema}`
                 """
                 )
@@ -138,18 +137,16 @@ class DatabricksTarget:
         """Upload a file to Databricks."""
 
         with sql.connect(
-            server_hostname            = self.server_hostname,
-            http_path                  = self.http_path,
-            access_token               = self.access_token,
-            staging_allowed_local_path = self.staging_allowed_local_path
+            server_hostname=self.server_hostname,
+            http_path=self.http_path,
+            access_token=self.access_token,
+            staging_allowed_local_path=self.staging_allowed_local_path,
         ) as connection:
-
             with connection.cursor() as cursor:
-
                 # Write a local file to the specified path in a volume.
                 # Specify OVERWRITE to overwrite any existing file in that path.
                 cursor.execute(
-                f"PUT '{input_full_path}' INTO '{self.dbx_volumes_path}/{filename}' OVERWRITE"
+                    f"PUT '{input_full_path}' INTO '{self.dbx_volumes_path}/{filename}' OVERWRITE"
                 )
 
                 return cursor.fetchall()
@@ -157,17 +154,15 @@ class DatabricksTarget:
     def upsert_new_data(self, parquet_filename: str):
         """Upsert new data from a parquet file into the table."""
         with sql.connect(
-            server_hostname            = self.server_hostname,
-            http_path                  = self.http_path,
-            access_token               = self.access_token,
-            staging_allowed_local_path = self.staging_allowed_local_path
+            server_hostname=self.server_hostname,
+            http_path=self.http_path,
+            access_token=self.access_token,
+            staging_allowed_local_path=self.staging_allowed_local_path,
         ) as connection:
-
             with connection.cursor() as cursor:
-
                 # Upsert data from the uploaded file into the table.
                 cursor.execute(
-                f"""
+                    f"""
                 MERGE INTO `{self.catalog}`.`{self.schema}`.`{self.table}` AS target
                     USING (
                     SELECT 
@@ -195,17 +190,15 @@ class DatabricksTarget:
     def initial_load(self, parquet_filename: str):
         """Initial load from a parquet file into the table."""
         with sql.connect(
-            server_hostname            = self.server_hostname,
-            http_path                  = self.http_path,
-            access_token               = self.access_token,
-            staging_allowed_local_path = self.staging_allowed_local_path
+            server_hostname=self.server_hostname,
+            http_path=self.http_path,
+            access_token=self.access_token,
+            staging_allowed_local_path=self.staging_allowed_local_path,
         ) as connection:
-
             with connection.cursor() as cursor:
-
                 # Initial load from the uploaded file into the table.
                 cursor.execute(
-                f"""
+                    f"""
                 COPY INTO `{self.catalog}`.`{self.schema}`.`{self.table}`
                 FROM (
                     SELECT 

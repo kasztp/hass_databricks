@@ -6,10 +6,13 @@ from hass_databricks.core.upload import (
 )
 
 
-@mark.parametrize("staging_path, expected_filename", [
-    ("/tmp/", "upload_2023-10-10-10-10-10.parquet"),
-    ("/data/", "upload_2023-10-10-10-10-10.parquet"),
-])
+@mark.parametrize(
+    "staging_path, expected_filename",
+    [
+        ("/tmp/", "upload_2023-10-10-10-10-10.parquet"),
+        ("/data/", "upload_2023-10-10-10-10-10.parquet"),
+    ],
+)
 @mock.patch("hass_databricks.core.upload.datetime")
 @mock.patch("hass_databricks.core.upload._extract_states_to_parquet")
 def test_create_data_pack(mock_extract, mock_datetime, staging_path, expected_filename):

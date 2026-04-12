@@ -18,6 +18,15 @@
           "access_token": "Databricks personal access token",
           "dbx_volumes_path": "Target path in Databricks Volumes used for parquet staging, e.g. /Volumes/catalog/schema/volume/"
         }
+      },
+      "reauth_confirm": {
+        "title": "Reconnect to Databricks",
+        "data": {
+          "access_token": "Access Token"
+        },
+        "data_description": {
+          "access_token": "Provide a new Databricks personal access token"
+        }
       }
     },
     "abort": {

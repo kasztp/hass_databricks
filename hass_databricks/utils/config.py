@@ -1,4 +1,5 @@
 """Config class for the project"""
+
 from typing import Dict, Any
 
 from hass_databricks.utils.validators import ConfigValidator
@@ -6,6 +7,7 @@ from hass_databricks.utils.validators import ConfigValidator
 
 class Config:
     """Config class for the project"""
+
     def __init__(self, config_file: str = None):
         self._config_file = config_file
         self._config = self.load_config(config_file)
@@ -49,7 +51,6 @@ class Config:
     def dbx_path(self) -> str:
         """Return the Databricks volumes path"""
         return self._config.get("DBX_VOLUMES_PATH")
-
 
     def load_config(self, config_file: str = None) -> Dict[str, Any]:
         """Load a config file and return a validated config dict"""

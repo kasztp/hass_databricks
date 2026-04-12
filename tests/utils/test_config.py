@@ -1,6 +1,6 @@
 """Tests for the Config class."""
+
 import json
-import os
 from unittest.mock import patch, mock_open
 
 from hass_databricks.utils.config import Config
@@ -49,7 +49,7 @@ def test_reload_config(good_config):
         "SCHEMA": "new_schema_name",
         "TABLE": "new_table_name",
         "LOCAL_PATH": "new_valid_local_path",
-        "DBX_VOLUMES_PATH": "new_valid_remote_path_in a Databricks volume"
+        "DBX_VOLUMES_PATH": "new_valid_remote_path_in a Databricks volume",
     }
     with patch("builtins.open", mock_open(read_data=json.dumps(changed_config))):
         c.reload_config()
@@ -67,7 +67,7 @@ def test_get_full_config(good_config):
         "SCHEMA": "schema_name",
         "TABLE": "table_name",
         "LOCAL_PATH": "valid_local_path",
-        "DBX_VOLUMES_PATH": "valid_remote_path_in a Databricks volume"
+        "DBX_VOLUMES_PATH": "valid_remote_path_in a Databricks volume",
     }
     c = Config("config.json")
     assert c.get_full_config() == config
