@@ -63,14 +63,14 @@ def _build_hass():
     async def _exec_in_executor(func, *args):
         return func(*args)
 
-    return SimpleNamespace(
-        data={},
-        config=SimpleNamespace(path=lambda name: f"/config/{name}"),
-        services=services,
-        config_entries=config_entries,
-        bus=SimpleNamespace(async_fire=mock.MagicMock()),
-        async_add_executor_job=mock.AsyncMock(side_effect=_exec_in_executor),
-    )
+    hass = mock.MagicMock()
+    hass.data = {}
+    hass.config = SimpleNamespace(path=lambda name: f"/config/{name}")
+    hass.services = services
+    hass.config_entries = config_entries
+    hass.bus = SimpleNamespace(async_fire=mock.MagicMock())
+    hass.async_add_executor_job = mock.AsyncMock(side_effect=_exec_in_executor)
+    return hass
 
 
 def _build_entry(auto_sync=False):
@@ -125,14 +125,17 @@ def test_service_handler_success_updates_sync_meta():
                 "custom_components.hass_databricks.pipeline.run_sync_pipeline",
                 return_value={
                     "rows": 12,
-                    "filename": "upload.parquet",
+                    "filename": "upload.csv.gz",
                     "max_last_updated_ts": 1700.0,
                     "used_hot_copy": False,
                 },
             ):
-                await async_setup_entry(hass, entry)
-                handler = hass.services.async_register.call_args.args[2]
-                await handler(SimpleNamespace(data={}))
+                with mock.patch(
+                    "custom_components.hass_databricks.async_get_clientsession"
+                ):
+                    await async_setup_entry(hass, entry)
+                    handler = hass.services.async_register.call_args.args[2]
+                    await handler(SimpleNamespace(data={}))
 
     asyncio.run(_run())
 
@@ -154,10 +157,13 @@ def test_service_handler_failure_sets_unavailable_and_triggers_reauth():
                 "custom_components.hass_databricks.pipeline.run_sync_pipeline",
                 side_effect=Exception("authentication failed: invalid token"),
             ):
-                await async_setup_entry(hass, entry)
-                handler = hass.services.async_register.call_args.args[2]
-                with pytest.raises(Exception, match="authentication failed"):
-                    await handler(SimpleNamespace(data={}))
+                with mock.patch(
+                    "custom_components.hass_databricks.async_get_clientsession"
+                ):
+                    await async_setup_entry(hass, entry)
+                    handler = hass.services.async_register.call_args.args[2]
+                    with pytest.raises(Exception, match="authentication failed"):
+                        await handler(SimpleNamespace(data={}))
 
     asyncio.run(_run())
 
@@ -199,7 +205,7 @@ def test_service_handler_uses_incremental_lookback_when_last_success_exists():
         captured["min_last_updated_ts"] = request.min_last_updated_ts
         return {
             "rows": 1,
-            "filename": "upload.parquet",
+            "filename": "upload.csv.gz",
             "max_last_updated_ts": 2100.0,
             "used_hot_copy": False,
         }
@@ -210,9 +216,12 @@ def test_service_handler_uses_incremental_lookback_when_last_success_exists():
                 "custom_components.hass_databricks.pipeline.run_sync_pipeline",
                 side_effect=_fake_pipeline,
             ):
-                await async_setup_entry(hass, entry)
-                handler = hass.services.async_register.call_args.args[2]
-                await handler(SimpleNamespace(data={}))
+                with mock.patch(
+                    "custom_components.hass_databricks.async_get_clientsession"
+                ):
+                    await async_setup_entry(hass, entry)
+                    handler = hass.services.async_register.call_args.args[2]
+                    await handler(SimpleNamespace(data={}))
 
     asyncio.run(_run())
     assert captured["min_last_updated_ts"] == 1400.0
@@ -230,10 +239,13 @@ def test_failure_with_non_auth_error_does_not_start_reauth():
                 "custom_components.hass_databricks.pipeline.run_sync_pipeline",
                 side_effect=Exception("disk full"),
             ):
-                await async_setup_entry(hass, entry)
-                handler = hass.services.async_register.call_args.args[2]
-                with pytest.raises(Exception, match="disk full"):
-                    await handler(SimpleNamespace(data={}))
+                with mock.patch(
+                    "custom_components.hass_databricks.async_get_clientsession"
+                ):
+                    await async_setup_entry(hass, entry)
+                    handler = hass.services.async_register.call_args.args[2]
+                    with pytest.raises(Exception, match="disk full"):
+                        await handler(SimpleNamespace(data={}))
 
     asyncio.run(_run())
     hass.config_entries.flow.async_init.assert_not_awaited()
@@ -254,10 +266,13 @@ def test_failure_when_reauth_init_raises_is_handled():
                 "custom_components.hass_databricks.pipeline.run_sync_pipeline",
                 side_effect=Exception("auth failed"),
             ):
-                await async_setup_entry(hass, entry)
-                handler = hass.services.async_register.call_args.args[2]
-                with pytest.raises(Exception, match="auth failed"):
-                    await handler(SimpleNamespace(data={}))
+                with mock.patch(
+                    "custom_components.hass_databricks.async_get_clientsession"
+                ):
+                    await async_setup_entry(hass, entry)
+                    handler = hass.services.async_register.call_args.args[2]
+                    with pytest.raises(Exception, match="auth failed"):
+                        await handler(SimpleNamespace(data={}))
 
     asyncio.run(_run())
 

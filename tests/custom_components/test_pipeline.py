@@ -31,7 +31,7 @@ def _request(**overrides):
     "custom_components.hass_databricks.pipeline.os.path.exists", return_value=True
 )
 @mock.patch("custom_components.hass_databricks.pipeline.DatabricksTarget")
-@mock.patch("custom_components.hass_databricks.pipeline._extract_states_to_parquet")
+@mock.patch("custom_components.hass_databricks.pipeline._extract_states_to_csv")
 @mock.patch("custom_components.hass_databricks.pipeline.datetime")
 def test_run_sync_pipeline_success(
     mock_datetime,
@@ -43,20 +43,22 @@ def test_run_sync_pipeline_success(
     mock_datetime.now.return_value.strftime.return_value = "2026-04-12-10-00-00"
     mock_extract.return_value = (7, 1700001111.0)
     target = mock_target_cls.return_value
-    target.create_schema.return_value = []
-    target.create_table.return_value = []
-    target.upload_to_databricks.return_value = [["ok"]]
-    target.upsert_new_data.return_value = [["ok"]]
+    target.create_schema = mock.AsyncMock(return_value=[])
+    target.create_table = mock.AsyncMock(return_value=[])
+    target.upload_to_databricks = mock.AsyncMock(return_value=[["ok"]])
+    target.upsert_new_data = mock.AsyncMock(return_value=[["ok"]])
 
-    result = pipeline.run_sync_pipeline(_request())
+    import asyncio
+
+    result = asyncio.run(pipeline.run_sync_pipeline(_request()))
 
     assert result["rows"] == 7
     assert result["max_last_updated_ts"] == 1700001111.0
-    assert result["filename"] == "upload_2026-04-12-10-00-00.parquet"
+    assert result["filename"] == "upload_2026-04-12-10-00-00.csv.gz"
     mock_extract.assert_called_once()
-    _, kwargs = mock_extract.call_args
-    assert kwargs["min_last_updated_ts"] == 1700000000.0
-    assert kwargs["use_hot_copy"] is False
+    args, _ = mock_extract.call_args
+    assert args[4] == 1700000000.0
+    assert args[5] is False
     mock_remove.assert_called_once()
 
 
@@ -65,7 +67,7 @@ def test_run_sync_pipeline_success(
     "custom_components.hass_databricks.pipeline.os.path.exists", return_value=True
 )
 @mock.patch("custom_components.hass_databricks.pipeline.DatabricksTarget")
-@mock.patch("custom_components.hass_databricks.pipeline._extract_states_to_parquet")
+@mock.patch("custom_components.hass_databricks.pipeline._extract_states_to_csv")
 @mock.patch("custom_components.hass_databricks.pipeline.datetime")
 def test_run_sync_pipeline_initial_defaults_to_hot_copy(
     mock_datetime,
@@ -77,18 +79,20 @@ def test_run_sync_pipeline_initial_defaults_to_hot_copy(
     mock_datetime.now.return_value.strftime.return_value = "2026-04-12-10-00-01"
     mock_extract.return_value = (3, 1700002111.0)
     target = mock_target_cls.return_value
-    target.create_schema.return_value = []
-    target.create_table.return_value = []
-    target.upload_to_databricks.return_value = [["ok"]]
-    target.upsert_new_data.return_value = [["ok"]]
+    target.create_schema = mock.AsyncMock(return_value=[])
+    target.create_table = mock.AsyncMock(return_value=[])
+    target.upload_to_databricks = mock.AsyncMock(return_value=[["ok"]])
+    target.upsert_new_data = mock.AsyncMock(return_value=[["ok"]])
 
-    result = pipeline.run_sync_pipeline(
-        _request(min_last_updated_ts=None, hot_copy_db=None)
+    import asyncio
+
+    result = asyncio.run(
+        pipeline.run_sync_pipeline(_request(min_last_updated_ts=None, hot_copy_db=None))
     )
 
     assert result["used_hot_copy"] is True
-    _, kwargs = mock_extract.call_args
-    assert kwargs["use_hot_copy"] is True
+    args, _ = mock_extract.call_args
+    assert args[5] is True
 
 
 @mock.patch("custom_components.hass_databricks.pipeline.os.remove")
@@ -96,7 +100,7 @@ def test_run_sync_pipeline_initial_defaults_to_hot_copy(
     "custom_components.hass_databricks.pipeline.os.path.exists", return_value=True
 )
 @mock.patch("custom_components.hass_databricks.pipeline.DatabricksTarget")
-@mock.patch("custom_components.hass_databricks.pipeline._extract_states_to_parquet")
+@mock.patch("custom_components.hass_databricks.pipeline._extract_states_to_csv")
 @mock.patch("custom_components.hass_databricks.pipeline.datetime")
 def test_run_sync_pipeline_can_force_hot_copy_override(
     mock_datetime,
@@ -108,29 +112,33 @@ def test_run_sync_pipeline_can_force_hot_copy_override(
     mock_datetime.now.return_value.strftime.return_value = "2026-04-12-10-00-02"
     mock_extract.return_value = (4, 1700003111.0)
     target = mock_target_cls.return_value
-    target.create_schema.return_value = []
-    target.create_table.return_value = []
-    target.upload_to_databricks.return_value = [["ok"]]
-    target.upsert_new_data.return_value = [["ok"]]
+    target.create_schema = mock.AsyncMock(return_value=[])
+    target.create_table = mock.AsyncMock(return_value=[])
+    target.upload_to_databricks = mock.AsyncMock(return_value=[["ok"]])
+    target.upsert_new_data = mock.AsyncMock(return_value=[["ok"]])
 
-    result = pipeline.run_sync_pipeline(_request(hot_copy_db=True))
+    import asyncio
+
+    result = asyncio.run(pipeline.run_sync_pipeline(_request(hot_copy_db=True)))
 
     assert result["used_hot_copy"] is True
-    _, kwargs = mock_extract.call_args
-    assert kwargs["use_hot_copy"] is True
+    args, _ = mock_extract.call_args
+    assert args[5] is True
 
 
-@mock.patch("custom_components.hass_databricks.pipeline._extract_states_to_parquet")
+@mock.patch("custom_components.hass_databricks.pipeline._extract_states_to_csv")
 def test_run_sync_pipeline_raises_when_no_rows(mock_extract):
     mock_extract.return_value = (0, None)
 
+    import asyncio
+
     with pytest.raises(ValueError, match="No rows were extracted"):
-        pipeline.run_sync_pipeline(_request())
+        asyncio.run(pipeline.run_sync_pipeline(_request()))
 
 
-def test_extract_states_to_parquet_filters_and_returns_max_ts(tmp_path):
+def test_extract_states_to_csv_filters_and_returns_max_ts(tmp_path):
     source_db = tmp_path / "source.db"
-    out_parquet = tmp_path / "out.parquet"
+    out_csv = tmp_path / "out.csv.gz"
 
     conn = pipeline.sqlite3.connect(source_db)
     try:
@@ -159,9 +167,9 @@ def test_extract_states_to_parquet_filters_and_returns_max_ts(tmp_path):
     finally:
         conn.close()
 
-    rows, max_ts = pipeline._extract_states_to_parquet(
+    rows, max_ts = pipeline._extract_states_to_csv(
         source_db_path=str(source_db),
-        output_parquet_path=str(out_parquet),
+        output_csv_path=str(out_csv),
         entity_like="sensor.%",
         chunk_size=100,
         min_last_updated_ts=1500.0,
@@ -169,39 +177,10 @@ def test_extract_states_to_parquet_filters_and_returns_max_ts(tmp_path):
 
     assert rows == 1
     assert max_ts == 2000.0
-    assert out_parquet.exists()
+    assert out_csv.exists()
 
 
 def test_databricks_target_methods_execute_queries():
-    class Cursor:
-        def __init__(self):
-            self.statements = []
-
-        def execute(self, statement):
-            self.statements.append(statement)
-
-        def fetchall(self):
-            return [["ok"]]
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_):
-            return False
-
-    class Connection:
-        def __init__(self):
-            self.cursor_obj = Cursor()
-
-        def cursor(self):
-            return self.cursor_obj
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_):
-            return False
-
     cfg = pipeline.RuntimeSyncConfig(
         catalog="main",
         schema="ha",
@@ -216,16 +195,29 @@ def test_databricks_target_methods_execute_queries():
         access_token="token",
     )
 
-    with mock.patch(
-        "custom_components.hass_databricks.pipeline.sql.connect",
-        return_value=Connection(),
-    ):
-        assert target.create_schema() == [["ok"]]
-        assert target.create_table() == [["ok"]]
-        assert target.upload_to_databricks("/tmp/file.parquet", "file.parquet") == [
-            ["ok"]
-        ]
-        assert target.upsert_new_data("file.parquet") == [["ok"]]
+    import asyncio
+
+    with mock.patch.object(
+        target, "_execute_sql", new_callable=mock.AsyncMock
+    ) as mock_sql:
+        with mock.patch.object(
+            target, "_upload_file", new_callable=mock.AsyncMock
+        ) as mock_upload:
+            mock_sql.return_value = {"status": {"state": "SUCCESS"}}
+            mock_upload.return_value = {"status": 200, "response": "ok"}
+
+            assert asyncio.run(target.create_schema()) == {
+                "status": {"state": "SUCCESS"}
+            }
+            assert asyncio.run(target.create_table()) == {
+                "status": {"state": "SUCCESS"}
+            }
+            assert asyncio.run(
+                target.upload_to_databricks("/tmp/file.csv.gz", "file.csv.gz")
+            ) == {"status": 200, "response": "ok"}
+            assert asyncio.run(target.upsert_new_data("file.csv.gz")) == {
+                "status": {"state": "SUCCESS"}
+            }
 
 
 @mock.patch("custom_components.hass_databricks.pipeline.os.remove")
@@ -233,7 +225,7 @@ def test_databricks_target_methods_execute_queries():
     "custom_components.hass_databricks.pipeline.os.path.exists", return_value=True
 )
 @mock.patch("custom_components.hass_databricks.pipeline.DatabricksTarget")
-@mock.patch("custom_components.hass_databricks.pipeline._extract_states_to_parquet")
+@mock.patch("custom_components.hass_databricks.pipeline._extract_states_to_csv")
 @mock.patch("custom_components.hass_databricks.pipeline.datetime")
 def test_run_sync_pipeline_keep_local_file_true_does_not_remove(
     mock_datetime,
@@ -245,20 +237,22 @@ def test_run_sync_pipeline_keep_local_file_true_does_not_remove(
     mock_datetime.now.return_value.strftime.return_value = "2026-04-12-10-00-03"
     mock_extract.return_value = (2, 1700004111.0)
     target = mock_target_cls.return_value
-    target.create_schema.return_value = []
-    target.create_table.return_value = []
-    target.upload_to_databricks.return_value = [["ok"]]
-    target.upsert_new_data.return_value = [["ok"]]
+    target.create_schema = mock.AsyncMock(return_value=[])
+    target.create_table = mock.AsyncMock(return_value=[])
+    target.upload_to_databricks = mock.AsyncMock(return_value=[["ok"]])
+    target.upsert_new_data = mock.AsyncMock(return_value=[["ok"]])
 
-    result = pipeline.run_sync_pipeline(_request(keep_local_file=True))
+    import asyncio
+
+    result = asyncio.run(pipeline.run_sync_pipeline(_request(keep_local_file=True)))
 
     assert result["rows"] == 2
     mock_remove.assert_not_called()
 
 
-def test_extract_states_to_parquet_without_hot_copy(tmp_path):
+def test_extract_states_to_csv_without_hot_copy(tmp_path):
     source_db = tmp_path / "source_no_copy.db"
-    out_parquet = tmp_path / "out_no_copy.parquet"
+    out_csv = tmp_path / "out_no_copy.csv.gz"
 
     conn = pipeline.sqlite3.connect(source_db)
     try:
@@ -278,9 +272,9 @@ def test_extract_states_to_parquet_without_hot_copy(tmp_path):
     finally:
         conn.close()
 
-    rows, max_ts = pipeline._extract_states_to_parquet(
+    rows, max_ts = pipeline._extract_states_to_csv(
         source_db_path=str(source_db),
-        output_parquet_path=str(out_parquet),
+        output_csv_path=str(out_csv),
         entity_like="sensor.%",
         chunk_size=10,
         min_last_updated_ts=None,

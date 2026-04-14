@@ -57,13 +57,13 @@ HACS metadata is provided in:
 - **Catalog**: Target Databricks catalog name (e.g., `main`)
 - **Schema**: Target schema in the catalog (e.g., `ha`)
 - **Table**: Target table for synced data (e.g., `sensor_states`)
-- **Databricks Volumes Path**: Staging path for parquet files (e.g., `/Volumes/main/ha/ingest`)
+- **Databricks Volumes Path**: Staging path for csv.gz files (e.g., `/Volumes/main/ha/ingest`)
 
 **Optional (Adjustable in Integration Options):**
 - **Entity Filter** (default: `sensor.%`): SQL LIKE pattern to filter entities (e.g., `sensor.%`, `climate.%`, `%temperature%`)
 - **Chunk Size** (default: `50000`): Number of rows extracted per batch (1,000–500,000)
-- **Keep Local File** (default: `false`): Retain local parquet file after upload for debugging
-- **Local Staging Path** (default: `/tmp/`): Directory for temporary parquet staging
+- **Keep Local File** (default: `false`): Retain local csv.gz file after upload for debugging
+- **Local Staging Path** (default: `/tmp/`): Directory for temporary staging
 - **Enable Automatic Sync** (default: `true`): Schedule periodic syncs
 - **Sync Interval** (default: `60` minutes): How often automatic syncs run (1–1440 minutes)
 
@@ -78,11 +78,11 @@ Databricks credentials can also be read from environment variables (if not confi
 
 The service hass_databricks.sync:
 
-1. Copies the live Home Assistant SQLite DB to a temporary file using shutil.copyfile.
+1. Safely creates a "hot copy" of the live Home Assistant SQLite DB using `sqlite3.backup` to properly handle WAL and avoid locking issues.
 2. Reads data from the copy with sqlite3 to avoid locking the live DB.
 3. Extracts rows in chunks from SQLite to keep memory usage bounded.
-4. Writes a parquet file locally.
-5. Uploads the parquet to a Databricks Volume.
+4. Writes a compressed csv.gz file locally.
+5. Uploads the file to a Databricks Volume.
 6. Runs MERGE into the target table.
 
 ### Incremental Sync Behavior
@@ -178,7 +178,7 @@ If manually installed, remove the directory `<config>/custom_components/hass_dat
 
 **Symptoms: "Sync dependencies unavailable"**
 - **Cause**: Integration dependencies not installed
-- **Solution**: Ensure the Home Assistant container includes Python dependencies. Rebuild the Docker image with `requirements.txt` or install via `pip install databricks-sql-connector pyarrow`
+- **Solution**: Ensure your network is active and HA meets baseline built-in package needs. (Previously, this plugin required heavy dependencies, but it now uses pure Python `csv`, `gzip`, and `aiohttp` to run natively!)
 
 ## CI / Validation
 
