@@ -9,6 +9,7 @@ import time
 from homeassistant.config_entries import ConfigEntry, SOURCE_REAUTH
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.const import Platform
@@ -179,6 +180,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ),
             hot_copy_db=call_data.get(CONF_HOT_COPY_DB),
             min_last_updated_ts=None,
+            session=async_get_clientsession(hass),
         )
 
         last_success_ts = hass.data[DOMAIN][entry.entry_id]["sync_meta"].get(
@@ -208,7 +210,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         _LOGGER.info("Starting hass_databricks sync service")
         try:
-            result = await hass.async_add_executor_job(run_sync_pipeline, request)
+            result = await run_sync_pipeline(request)
         except Exception as err:
             try:
                 await _start_reauth_if_needed(err)

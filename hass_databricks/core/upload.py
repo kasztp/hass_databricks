@@ -1,3 +1,4 @@
+import asyncio
 from argparse import ArgumentParser
 from dataclasses import dataclass
 from datetime import datetime
@@ -6,23 +7,14 @@ import shutil
 import sqlite3
 import tempfile
 from typing import Optional, Tuple
-
-import pyarrow as pa
-import pyarrow.parquet as pq
+import csv
+import gzip
 
 from hass_databricks.core.databricks import DatabricksTarget
 from hass_databricks.utils.config import Config
 
 
 CHUNK_SIZE = 50_000
-
-PARQUET_SCHEMA = pa.schema(
-    [
-        ("state", pa.string()),
-        ("last_updated_ts", pa.float64()),
-        ("entity_id", pa.string()),
-    ]
-)
 
 
 @dataclass
@@ -36,9 +28,9 @@ class RuntimeSyncConfig:
     dbx_path: str
 
 
-def _extract_states_to_parquet(
+def _extract_states_to_csv(
     source_db_path: str,
-    output_parquet_path: str,
+    output_csv_path: str,
     entity_like: str = "sensor.%",
     start_state_id: int = 0,
     chunk_size: int = CHUNK_SIZE,
@@ -52,7 +44,6 @@ def _extract_states_to_parquet(
     os.close(fd)
     shutil.copyfile(source_db_path, temp_db_path)
 
-    writer: Optional[pq.ParquetWriter] = None
     total_rows = 0
     last_state_id = int(start_state_id)
 
@@ -77,43 +68,34 @@ def _extract_states_to_parquet(
         connection = sqlite3.connect(f"file:{temp_db_path}?mode=ro", uri=True)
         try:
             cursor = connection.cursor()
-            cursor.execute(query, (last_state_id, entity_like, chunk_size))
-            while True:
-                rows = cursor.fetchmany(chunk_size)
-                if not rows:
-                    break
 
-                last_state_id = int(rows[-1][0])
-                state_values = [row[1] for row in rows]
-                ts_values = [row[2] for row in rows]
-                entity_values = [row[3] for row in rows]
-
-                table = pa.Table.from_arrays(
-                    [
-                        pa.array(state_values, type=pa.string()),
-                        pa.array(ts_values, type=pa.float64()),
-                        pa.array(entity_values, type=pa.string()),
-                    ],
-                    schema=PARQUET_SCHEMA,
-                )
-                if writer is None:
-                    writer = pq.ParquetWriter(output_parquet_path, PARQUET_SCHEMA)
-                writer.write_table(table)
-                total_rows += len(rows)
+            with gzip.open(output_csv_path, "wt", encoding="utf-8", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["state", "last_updated_ts", "entity_id"])
 
                 cursor.execute(query, (last_state_id, entity_like, chunk_size))
+                while True:
+                    rows = cursor.fetchmany(chunk_size)
+                    if not rows:
+                        break
+
+                    last_state_id = int(rows[-1][0])
+
+                    csv_rows = [[row[1], row[2], row[3]] for row in rows]
+                    writer.writerows(csv_rows)
+                    total_rows += len(rows)
+
+                    cursor.execute(query, (last_state_id, entity_like, chunk_size))
         finally:
             connection.close()
     finally:
-        if writer is not None:
-            writer.close()
         if os.path.exists(temp_db_path):
             os.remove(temp_db_path)
 
     return total_rows
 
 
-def run_sync_pipeline(
+async def run_sync_pipeline(
     source_db_path: str,
     catalog: str,
     schema: str,
@@ -127,16 +109,16 @@ def run_sync_pipeline(
     http_path: Optional[str] = None,
     access_token: Optional[str] = None,
 ) -> dict:
-    """Run blocking extraction, upload, and merge using core modules only."""
+    """Run async extraction, upload, and merge using core modules only."""
 
     os.makedirs(local_path, exist_ok=True)
     export_time = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    filename = f"upload_{export_time}.parquet"
+    filename = f"upload_{export_time}.csv.gz"
     full_path = os.path.join(local_path, filename)
 
-    rows_written = _extract_states_to_parquet(
+    rows_written = _extract_states_to_csv(
         source_db_path=source_db_path,
-        output_parquet_path=full_path,
+        output_csv_path=full_path,
         entity_like=entity_like,
         chunk_size=chunk_size,
     )
@@ -156,10 +138,10 @@ def run_sync_pipeline(
         http_path=http_path,
         access_token=access_token,
     )
-    sqlwh.create_schema()
-    sqlwh.create_table()
-    upload_state = sqlwh.upload_to_databricks(full_path, filename)
-    upsert_state = sqlwh.upsert_new_data(filename)
+    await sqlwh.create_schema()
+    await sqlwh.create_table()
+    upload_state = await sqlwh.upload_to_databricks(full_path, filename)
+    upsert_state = await sqlwh.upsert_new_data(filename)
 
     if not keep_local_file and os.path.exists(full_path):
         os.remove(full_path)
@@ -180,38 +162,27 @@ def create_data_pack(configuration: Config) -> Tuple[str, str]:
 
     Returns:
         full_path (str): The full path of the data
-        filename_parquet (str): The filename of the data in Parquet
+        filename_csv_gz (str): The filename of the data in CSV Gzip format
     """
     export_time = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
     staging_path = configuration.local_path
-    filename_parquet = f"upload_{export_time}.parquet"
-    full_path = staging_path + filename_parquet
+    filename_csv_gz = f"upload_{export_time}.csv.gz"
+    full_path = os.path.join(staging_path, filename_csv_gz)
 
     db_path = os.getenv("HA_SQLITE_DB_PATH", "home-assistant_v2.db")
-    rows_written = _extract_states_to_parquet(db_path, full_path)
+    rows_written = _extract_states_to_csv(db_path, full_path)
     if rows_written == 0:
         raise ValueError("No rows were extracted from Home Assistant database.")
-    print(f"File saved for upload: {filename_parquet}")
+    print(f"File saved for upload: {filename_csv_gz}")
 
-    return full_path, filename_parquet
+    return full_path, filename_csv_gz
 
 
 def create_incremental_data_pack(
     configuration: Config, last_update_time: Optional[str]
 ) -> Tuple[str, str]:
-    """Create an incremental data pack for upload to Databricks.
-
-    Args:
-        config (Config): The project config.
-        last_update_time (str): The last update time in "%Y-%m-%d-%H-%M-%S" format.
-        If None, the function will check for the latest existing data pack in the staging_path,
-        then derive last_update_time from the filename.
-
-    Returns:
-        full_path (str): The full path of the data
-        filename_parquet (str): The filename of the data in Parquet
-    """
+    """Create an incremental data pack for upload to Databricks."""
 
     export_time = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
@@ -220,7 +191,7 @@ def create_incremental_data_pack(
         start_state_id = int(last_update_time)
     else:
         existing_data_packs = [
-            f for f in os.listdir(configuration.local_path) if f.endswith(".parquet")
+            f for f in os.listdir(configuration.local_path) if f.endswith(".csv.gz")
         ]
         if existing_data_packs:
             latest_data_pack = max(existing_data_packs, key=os.path.getctime)
@@ -229,53 +200,33 @@ def create_incremental_data_pack(
                 start_state_id = int(suffix)
 
     staging_path = configuration.local_path
-    filename_parquet = f"upload_{export_time}.parquet"
-    full_path = staging_path + filename_parquet
+    filename_csv_gz = f"upload_{export_time}.csv.gz"
+    full_path = os.path.join(staging_path, filename_csv_gz)
 
     db_path = os.getenv("HA_SQLITE_DB_PATH", "home-assistant_v2.db")
-    rows_written = _extract_states_to_parquet(
+    rows_written = _extract_states_to_csv(
         source_db_path=db_path,
-        output_parquet_path=full_path,
+        output_csv_path=full_path,
         start_state_id=start_state_id,
     )
     if rows_written == 0:
         raise ValueError("No rows were extracted from Home Assistant database.")
-    print(f"File saved for upload: {filename_parquet}")
+    print(f"File saved for upload: {filename_csv_gz}")
 
-    return full_path, filename_parquet
+    return full_path, filename_csv_gz
 
 
-if __name__ == "__main__":
+async def main():
     # Parse the command line arguments
     parser = ArgumentParser()
-    parser.add_argument(
-        "-c",
-        "--config",
-        type=str,
-        default="config.json",
-        help="The path to the config file (default: config.json).",
-    )
-    parser.add_argument(
-        "-i",
-        "--incremental",
-        action="store_true",
-        help="Create an incremental data pack.",
-    )
-    parser.add_argument(
-        "-k", "--keep_last", action="store_true", help="Keep the last data pack."
-    )
-    parser.add_argument(
-        "-l",
-        "--last_update_time",
-        type=str,
-        help="The last update time in '%Y-%m-%d-%H-%M-%S' format.",
-    )
+    parser.add_argument("-c", "--config", type=str, default="config.json")
+    parser.add_argument("-i", "--incremental", action="store_true")
+    parser.add_argument("-k", "--keep_last", action="store_true")
+    parser.add_argument("-l", "--last_update_time", type=str)
     args = parser.parse_args()
 
-    # Load the config
     config = Config(args.config)
 
-    # Create a data pack
     if args.incremental:
         file_path, filename = create_incremental_data_pack(
             config, args.last_update_time
@@ -283,25 +234,25 @@ if __name__ == "__main__":
     else:
         file_path, filename = create_data_pack(config)
 
-    # Initialize the Databricks target
     sqlwh = DatabricksTarget(config)
 
-    # Create a schema and table in Databricks if necessary
-    sqlwh.create_schema()
-    sqlwh.create_table()
+    await sqlwh.create_schema()
+    await sqlwh.create_table()
 
-    # Upload the data to Databricks
-    load_state = sqlwh.upload_to_databricks(file_path, filename)
+    load_state = await sqlwh.upload_to_databricks(file_path, filename)
     print(f"Data pack {filename} uploaded to Databricks.")
+    print(f"Upload details: {load_state}")
 
-    # Upsert the new data into the table
-    upsert_state = sqlwh.upsert_new_data(filename)
+    upsert_state = await sqlwh.upsert_new_data(filename)
     print(f"Data pack {filename} upserted into the table.")
     print(f"Operation details: {upsert_state}")
 
-    # Clean up
     if not args.keep_last:
         os.remove(file_path)
         print(f"File {file_path} removed.")
 
     print("Data upload complete.")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -156,3 +156,5 @@ cython_debug/
 
 # Local Home Assistant runtime
 .homeassistant/
+.ha_config/
+docker-compose.yml
