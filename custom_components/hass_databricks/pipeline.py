@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 from datetime import datetime
 import os
 import shutil
 import sqlite3
 import tempfile
-from typing import Optional
 
-import pyarrow as pa
-import pyarrow.parquet as pq
 from databricks import sql
 
 
@@ -33,15 +31,6 @@ class SyncRequest:
     keep_local_file: bool
     hot_copy_db: bool | None = None
     min_last_updated_ts: float | None = None
-
-
-PARQUET_SCHEMA = pa.schema(
-    [
-        ("state", pa.string()),
-        ("last_updated_ts", pa.float64()),
-        ("entity_id", pa.string()),
-    ]
-)
 
 
 @dataclass
@@ -116,8 +105,8 @@ class DatabricksTarget:
                 )
                 return cursor.fetchall()
 
-    def upsert_new_data(self, parquet_filename: str):
-        """Upsert uploaded parquet into target Delta table."""
+    def upsert_new_data(self, filename: str):
+        """Upsert uploaded file into target Delta table."""
         with self._connect() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -128,7 +117,7 @@ class DatabricksTarget:
                             TRY_CAST(state AS FLOAT) AS state,
                             TRY_CAST(last_updated_ts AS TIMESTAMP) AS last_updated_ts,
                             entity_id
-                        FROM read_files('{self._config.dbx_path}/{parquet_filename}')
+                        FROM read_files('{self._config.dbx_path}/{filename}')
                     ) AS source
                     ON
                         target.entity_id = source.entity_id
@@ -146,15 +135,15 @@ class DatabricksTarget:
                 return cursor.fetchall()
 
 
-def _extract_states_to_parquet(
+def _extract_states_to_csv(
     source_db_path: str,
-    output_parquet_path: str,
+    output_csv_path: str,
     entity_like: str,
     chunk_size: int,
     min_last_updated_ts: float | None = None,
     use_hot_copy: bool = True,
 ) -> tuple[int, float | None]:
-    """Extract matching states into parquet in chunks.
+    """Extract matching states into a CSV file in chunks.
 
     When use_hot_copy is True, copy the active DB first to reduce lock contention.
     """
@@ -167,7 +156,6 @@ def _extract_states_to_parquet(
         shutil.copyfile(source_db_path, temp_db_path)
         read_db_path = temp_db_path
 
-    writer: Optional[pq.ParquetWriter] = None
     total_rows = 0
     last_state_id = 0
     max_last_updated_ts: float | None = None
@@ -197,43 +185,32 @@ def _extract_states_to_parquet(
     try:
         connection = sqlite3.connect(f"file:{read_db_path}?mode=ro", uri=True)
         try:
-            cursor = connection.cursor()
-            cursor.execute(
-                query, (last_state_id, effective_min_ts, entity_like, chunk_size)
-            )
-            while True:
-                rows = cursor.fetchmany(chunk_size)
-                if not rows:
-                    break
-
-                last_state_id = int(rows[-1][0])
-                state_values = [row[1] for row in rows]
-                ts_values = [row[2] for row in rows]
-                entity_values = [row[3] for row in rows]
-                chunk_max_ts = max(ts_values)
-                if max_last_updated_ts is None or chunk_max_ts > max_last_updated_ts:
-                    max_last_updated_ts = float(chunk_max_ts)
-
-                table = pa.Table.from_arrays(
-                    [
-                        pa.array(state_values, type=pa.string()),
-                        pa.array(ts_values, type=pa.float64()),
-                        pa.array(entity_values, type=pa.string()),
-                    ],
-                    schema=PARQUET_SCHEMA,
-                )
-                if writer is None:
-                    writer = pq.ParquetWriter(output_parquet_path, PARQUET_SCHEMA)
-                writer.write_table(table)
-                total_rows += len(rows)
+            with open(output_csv_path, "w", newline="") as csv_file:
+                writer = csv.writer(csv_file)
+                writer.writerow(["state", "last_updated_ts", "entity_id"])
+                cursor = connection.cursor()
                 cursor.execute(
                     query, (last_state_id, effective_min_ts, entity_like, chunk_size)
                 )
+                while True:
+                    rows = cursor.fetchmany(chunk_size)
+                    if not rows:
+                        break
+
+                    last_state_id = int(rows[-1][0])
+                    chunk_max_ts = max(row[2] for row in rows)
+                    if max_last_updated_ts is None or chunk_max_ts > max_last_updated_ts:
+                        max_last_updated_ts = float(chunk_max_ts)
+
+                    for row in rows:
+                        writer.writerow([row[1], row[2], row[3]])
+                    total_rows += len(rows)
+                    cursor.execute(
+                        query, (last_state_id, effective_min_ts, entity_like, chunk_size)
+                    )
         finally:
             connection.close()
     finally:
-        if writer is not None:
-            writer.close()
         if temp_db_path is not None and os.path.exists(temp_db_path):
             os.remove(temp_db_path)
 
@@ -245,7 +222,7 @@ def run_sync_pipeline(request: SyncRequest) -> dict:
 
     os.makedirs(request.local_path, exist_ok=True)
     export_time = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    filename = f"upload_{export_time}.parquet"
+    filename = f"upload_{export_time}.csv"
     full_path = os.path.join(request.local_path, filename)
 
     use_hot_copy = (
@@ -254,9 +231,9 @@ def run_sync_pipeline(request: SyncRequest) -> dict:
         else request.min_last_updated_ts is None
     )
 
-    rows_written, max_last_updated_ts = _extract_states_to_parquet(
+    rows_written, max_last_updated_ts = _extract_states_to_csv(
         source_db_path=request.db_path,
-        output_parquet_path=full_path,
+        output_csv_path=full_path,
         entity_like=request.entity_like,
         chunk_size=request.chunk_size,
         min_last_updated_ts=request.min_last_updated_ts,
