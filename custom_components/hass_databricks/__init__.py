@@ -181,6 +181,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hot_copy_db=call_data.get(CONF_HOT_COPY_DB),
             min_last_updated_ts=None,
             session=async_get_clientsession(hass),
+            hass=hass,
         )
 
         last_success_ts = hass.data[DOMAIN][entry.entry_id]["sync_meta"].get(

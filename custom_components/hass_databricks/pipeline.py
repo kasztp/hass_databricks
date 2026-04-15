@@ -13,6 +13,7 @@ from typing import Optional
 import csv
 import gzip
 import aiohttp
+from typing import Any
 
 
 @dataclass
@@ -34,6 +35,34 @@ class SyncRequest:
     hot_copy_db: bool | None = None
     min_last_updated_ts: float | None = None
     session: aiohttp.ClientSession | None = None
+    hass: Any | None = None
+
+
+def _read_file_content(path: str) -> bytes:
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def _remove_path(path: str) -> None:
+    if os.path.exists(path):
+        try:
+            if os.path.isdir(path):
+                os.rmdir(path)
+            else:
+                os.remove(path)
+        except OSError:
+            pass
+
+
+def _makedirs(path: str) -> None:
+    os.makedirs(path, exist_ok=True)
+
+
+async def _async_run_job(hass: Any | None, func, *args):
+    """Run a blocking job in the HA executor or default event loop."""
+    if hass:
+        return await hass.async_add_executor_job(func, *args)
+    return await asyncio.get_running_loop().run_in_executor(None, func, *args)
 
 
 @dataclass
@@ -58,12 +87,14 @@ class DatabricksTarget:
         http_path: str,
         access_token: str,
         session: aiohttp.ClientSession | None = None,
+        hass: Any | None = None,
     ):
         self._config = config
         self._server_hostname = server_hostname
         self._http_path = http_path
         self._access_token = access_token
         self._session = session
+        self._hass = hass
 
     async def _execute_sql(self, statement: str) -> dict:
         """Execute a SQL statement using the Databricks REST API asynchronously."""
@@ -111,11 +142,11 @@ class DatabricksTarget:
                 "Authorization": f"Bearer {self._access_token}",
                 "Content-Type": "application/octet-stream",
             }
-            with open(file_path, "rb") as f:
-                async with session.put(url, headers=headers, data=f) as resp:
-                    resp.raise_for_status()
-                    text = await resp.text()
-                    return {"status": resp.status, "response": text}
+            file_bytes = await _async_run_job(self._hass, _read_file_content, file_path)
+            async with session.put(url, headers=headers, data=file_bytes) as resp:
+                resp.raise_for_status()
+                text = await resp.text()
+                return {"status": resp.status, "response": text}
         finally:
             if close_session:
                 await session.close()
@@ -285,12 +316,12 @@ def _extract_chunk_to_csv(
 async def run_sync_pipeline(request: SyncRequest) -> dict:
     """Run async extraction, upload, and merge in isolated micro-batches."""
 
-    os.makedirs(request.local_path, exist_ok=True)
+    await _async_run_job(request.hass, _makedirs, request.local_path)
     export_time = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     job_id = f"upload_{export_time}"
     job_local_path = os.path.join(request.local_path, job_id)
-    os.makedirs(job_local_path, exist_ok=True)
-    
+    await _async_run_job(request.hass, _makedirs, job_local_path)
+
     dbx_job_path = f"{request.dbx_volumes_path}/{job_id}"
 
     runtime_config = RuntimeSyncConfig(
@@ -306,6 +337,7 @@ async def run_sync_pipeline(request: SyncRequest) -> dict:
         http_path=request.http_path,
         access_token=request.access_token,
         session=request.session,
+        hass=request.hass,
     )
 
     await sqlwh.create_schema()
@@ -334,8 +366,7 @@ async def run_sync_pipeline(request: SyncRequest) -> dict:
         )
 
         if rows_extracted == 0:
-            if os.path.exists(chunk_output_path):
-                os.remove(chunk_output_path)
+            await _async_run_job(request.hass, _remove_path, chunk_output_path)
             break
 
         total_rows += rows_extracted
@@ -346,20 +377,16 @@ async def run_sync_pipeline(request: SyncRequest) -> dict:
 
         # Upload
         await sqlwh._upload_file(chunk_output_path, f"{dbx_job_path}/{filename}")
-        
+
         # Cleanup local chunk immediately
-        if not request.keep_local_file and os.path.exists(chunk_output_path):
-            os.remove(chunk_output_path)
+        if not request.keep_local_file:
+            await _async_run_job(request.hass, _remove_path, chunk_output_path)
 
     if total_rows == 0:
-        if os.path.exists(job_local_path):
-            try:
-                os.rmdir(job_local_path)
-            except OSError:
-                pass
+        await _async_run_job(request.hass, _remove_path, job_local_path)
         raise ValueError("No rows were extracted from Home Assistant database.")
 
-    # Finish: Merge all chunks dynamically mapped explicitly 
+    # Finish: Merge all chunks dynamically mapped explicitly
     upsert_state = await sqlwh.upsert_new_data(f"{dbx_job_path}/*.csv.gz")
 
     # Cleanup Databricks Volume explicit ingest folder
@@ -369,11 +396,7 @@ async def run_sync_pipeline(request: SyncRequest) -> dict:
         pass
 
     # Cleanup local Job Dir
-    if os.path.exists(job_local_path):
-        try:
-            os.rmdir(job_local_path)
-        except OSError:
-            pass
+    await _async_run_job(request.hass, _remove_path, job_local_path)
 
     return {
         "filename": job_id,

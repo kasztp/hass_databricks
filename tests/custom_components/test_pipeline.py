@@ -43,13 +43,10 @@ def test_run_sync_pipeline_success(
     mock_remove,
 ):
     mock_datetime.now.return_value.strftime.return_value = "2026-04-12-10-00-00"
-    
+
     # First chunk returns 7 rows, second chunk returns 0 (EOF)
-    mock_extract.side_effect = [
-        (7, 1700001111.0, 7),
-        (0, None, 7)
-    ]
-    
+    mock_extract.side_effect = [(7, 1700001111.0, 7), (0, None, 7)]
+
     target = mock_target_cls.return_value
     target.create_schema = mock.AsyncMock(return_value=[])
     target.create_table = mock.AsyncMock(return_value=[])
@@ -64,15 +61,15 @@ def test_run_sync_pipeline_success(
     assert result["rows"] == 7
     assert result["max_last_updated_ts"] == 1700001111.0
     assert result["filename"] == "upload_2026-04-12-10-00-00"
-    
+
     assert mock_extract.call_count == 2
     args_call_1, _ = mock_extract.call_args_list[0]
     assert args_call_1[4] == 1700000000.0
     assert args_call_1[5] == 0
-    
+
     args_call_2, _ = mock_extract.call_args_list[1]
     assert args_call_2[5] == 7
-    
+
     mock_remove.assert_called()
 
 
@@ -80,14 +77,16 @@ def test_run_sync_pipeline_success(
 @mock.patch("custom_components.hass_databricks.pipeline._extract_chunk_to_csv")
 def test_run_sync_pipeline_raises_when_no_rows(mock_extract, mock_target):
     mock_extract.return_value = (0, None, 0)
-    
+
     target = mock_target.return_value
     target.create_schema = mock.AsyncMock(return_value=[])
     target.create_table = mock.AsyncMock(return_value=[])
 
     import asyncio
 
-    with pytest.raises(ValueError, match="No rows were extracted from Home Assistant database."):
+    with pytest.raises(
+        ValueError, match="No rows were extracted from Home Assistant database."
+    ):
         asyncio.run(pipeline.run_sync_pipeline(_request()))
 
 
@@ -195,7 +194,7 @@ def test_run_sync_pipeline_keep_local_file_true_does_not_remove(
 ):
     mock_datetime.now.return_value.strftime.return_value = "2026-04-12-10-00-03"
     mock_extract.side_effect = [(2, 1700004111.0, 2), (0, None, 2)]
-    
+
     target = mock_target_cls.return_value
     target.create_schema = mock.AsyncMock(return_value=[])
     target.create_table = mock.AsyncMock(return_value=[])
@@ -208,4 +207,6 @@ def test_run_sync_pipeline_keep_local_file_true_does_not_remove(
     result = asyncio.run(pipeline.run_sync_pipeline(_request(keep_local_file=True)))
 
     assert result["rows"] == 2
-    mock_remove.assert_called_once_with("/tmp/upload_2026-04-12-10-00-03/part_00002.csv.gz")
+    mock_remove.assert_called_once_with(
+        "/tmp/upload_2026-04-12-10-00-03/part_00002.csv.gz"
+    )
