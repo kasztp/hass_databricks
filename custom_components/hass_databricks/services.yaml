@@ -1,7 +1,7 @@
 sync:
   name: Sync Home Assistant data to Databricks
   description: >
-    Extract states from Home Assistant SQLite DB, upload parquet to Databricks
+    Extract states from Home Assistant SQLite DB, upload compressed csv to Databricks
     volume, and MERGE into target table. All target fields default to the values
     configured in the integration UI; supply them here only to override for a
     one-off call.
@@ -52,12 +52,5 @@ sync:
     keep_local_file:
       required: false
       default: false
-      selector:
-        boolean:
-    hot_copy_db:
-      required: false
-      description: >
-        Override DB hot-copy behavior for this run. If omitted, initial runs use
-        hot copy while incremental runs read directly from the live DB.
       selector:
         boolean:

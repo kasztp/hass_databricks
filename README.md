@@ -78,12 +78,12 @@ Databricks credentials can also be read from environment variables (if not confi
 
 The service hass_databricks.sync:
 
-1. Safely creates a "hot copy" of the live Home Assistant SQLite DB using `sqlite3.backup` to properly handle WAL and avoid locking issues.
-2. Reads data from the copy with sqlite3 to avoid locking the live DB.
-3. Extracts rows in chunks from SQLite to keep memory usage bounded.
-4. Writes a compressed csv.gz file locally.
-5. Uploads the file to a Databricks Volume.
-6. Runs MERGE into the target table.
+1. Connects strictly as a read-only client to the active Home Assistant SQLite DB, extracting rows in micro-batch chunks sequentially to avoid long-running WAL lock contention.
+2. Iteratively writes these chunks to transient local `csv.gz` buffers.
+3. Instantly uploads each buffered chunk to a tracking folder inside Databricks Volumes.
+4. Deletes the local chunk buffer immediately (prohibiting memory creep and massive local storage exhaustion).
+5. Once all chunks are ingested, triggers a wild-card MERGE on the cluster side for high-performance ingestion into the target table.
+6. Maps Databricks APIs to safely delete the transient volume tracking folder on completion.
 
 ### Incremental Sync Behavior
 
@@ -108,13 +108,7 @@ data:
 	entity_like: sensor.%
 	chunk_size: 50000
 	keep_local_file: false
-	hot_copy_db: true
 ```
-
-`hot_copy_db` is optional. If omitted, the integration uses:
-
-- `true` for initial syncs (no prior successful watermark)
-- `false` for incremental syncs
 
 Databricks credentials are read from environment variables:
 

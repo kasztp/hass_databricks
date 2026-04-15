@@ -120,6 +120,28 @@ class DatabricksTarget:
             if close_session:
                 await session.close()
 
+    async def delete_volume_folder(self, databricks_path: str) -> dict:
+        """Delete a folder from Databricks Volumes asynchronously."""
+        close_session = False
+        session = self._session
+        if session is None:
+            session = aiohttp.ClientSession()
+            close_session = True
+
+        try:
+            url = f"https://{self._server_hostname}/api/2.0/fs/directories{databricks_path}"
+            headers = {
+                "Authorization": f"Bearer {self._access_token}",
+                "Content-Type": "application/json",
+            }
+            async with session.delete(url, headers=headers) as resp:
+                resp.raise_for_status()
+                text = await resp.text()
+                return {"status": resp.status, "response": text}
+        finally:
+            if close_session:
+                await session.close()
+
     async def create_schema(self):
         """Create target schema when it does not exist."""
         statement = f"CREATE SCHEMA IF NOT EXISTS `{self._config.catalog}`.`{self._config.schema}`"
@@ -143,8 +165,8 @@ class DatabricksTarget:
         databricks_path = f"{self._config.dbx_path}/{filename}"
         return await self._upload_file(input_full_path, databricks_path)
 
-    async def upsert_new_data(self, filename: str):
-        """Upsert uploaded csv into target Delta table."""
+    async def upsert_new_data(self, source_path: str):
+        """Upsert uploaded csv into target Delta table using wildcards or explicit paths."""
         statement = f"""
         MERGE INTO `{self._config.catalog}`.`{self._config.schema}`.`{self._config.table}` AS target
         USING (
@@ -152,7 +174,7 @@ class DatabricksTarget:
                 TRY_CAST(state AS FLOAT) AS state,
                 TRY_CAST(last_updated_ts AS TIMESTAMP) AS last_updated_ts,
                 entity_id
-            FROM read_files('{self._config.dbx_path}/{filename}', format => 'csv', header => 'true')
+            FROM read_files('{source_path}', format => 'csv', header => 'true')
         ) AS source
         ON
             target.entity_id = source.entity_id
@@ -169,45 +191,21 @@ class DatabricksTarget:
         return await self._execute_sql(statement)
 
 
-def _extract_states_to_csv(
+def _extract_chunk_to_csv(
     source_db_path: str,
     output_csv_path: str,
     entity_like: str,
     chunk_size: int,
     min_last_updated_ts: float | None = None,
-    use_hot_copy: bool = True,
-) -> tuple[int, float | None]:
-    """Extract matching states into csv.gz in chunks.
+    last_state_id: int = 0,
+) -> tuple[int, float | None, int]:
+    """Extract matching states into csv.gz for a single chunk window.
 
-    When use_hot_copy is True, use sqlite3.backup to copy the active DB safely,
-    handling WAL mode correctly unlike shutil.copyfile.
+    Native RO transaction closes completely after returning to unblock WAL checkpoints.
     """
 
-    read_db_path = source_db_path
-    temp_db_path: str | None = None
-    if use_hot_copy:
-        # fd, temp_db_path = tempfile.mkstemp(prefix="ha_temp_", suffix=".db")
-        # os.close(fd)
-        # Using a proper sqlite backup is safer for WAL databases
-        _, temp_db_path = tempfile.mkstemp(prefix="ha_temp_", suffix=".db")
-
-        try:
-            # Open source in read-only mode for backup
-            with sqlite3.connect(f"file:{source_db_path}?mode=ro", uri=True) as src:
-                with sqlite3.connect(temp_db_path) as dst:
-                    src.backup(dst)
-            read_db_path = temp_db_path
-        except Exception as err:
-            if os.path.exists(temp_db_path):
-                os.remove(temp_db_path)
-            raise Exception(f"Failed to create hot copy of database: {err}") from err
-
-    total_rows = 0
-    last_state_id = 0
-    max_last_updated_ts: float | None = None
-
     try:
-        connection = sqlite3.connect(f"file:{read_db_path}?mode=ro", uri=True)
+        connection = sqlite3.connect(f"file:{source_db_path}?mode=ro", uri=True)
         try:
             cursor = connection.cursor()
 
@@ -260,63 +258,40 @@ def _extract_states_to_csv(
                 cursor.execute(
                     query, (last_state_id, effective_min_ts, entity_like, chunk_size)
                 )
-                while True:
-                    rows = cursor.fetchmany(chunk_size)
-                    if not rows:
-                        break
+                rows = cursor.fetchall()
+                if not rows:
+                    return 0, None, last_state_id
 
-                    last_state_id = int(rows[-1][0])
-                    csv_rows = []
-                    for row in rows:
-                        row_ts = row[2]
-                        if max_last_updated_ts is None or row_ts > max_last_updated_ts:
-                            max_last_updated_ts = float(row_ts)
-                        csv_rows.append([row[1], row[2], row[3]])
+                max_last_updated_ts: float | None = None
+                next_state_id = int(rows[-1][0])
+                csv_rows = []
+                for row in rows:
+                    row_ts = row[2]
+                    if max_last_updated_ts is None or row_ts > max_last_updated_ts:
+                        max_last_updated_ts = float(row_ts)
+                    csv_rows.append([row[1], row[2], row[3]])
 
-                    writer.writerows(csv_rows)
-                    total_rows += len(rows)
-                    cursor.execute(
-                        query,
-                        (last_state_id, effective_min_ts, entity_like, chunk_size),
-                    )
+                writer.writerows(csv_rows)
+                total_rows = len(rows)
+
         finally:
             connection.close()
-    finally:
-        if temp_db_path is not None and os.path.exists(temp_db_path):
-            os.remove(temp_db_path)
+    except Exception as err:
+        raise Exception(f"Failed to query database state chunk: {err}") from err
 
-    return total_rows, max_last_updated_ts
+    return total_rows, max_last_updated_ts, next_state_id
 
 
 async def run_sync_pipeline(request: SyncRequest) -> dict:
-    """Run async extraction, upload, and merge in Home Assistant runtime."""
+    """Run async extraction, upload, and merge in isolated micro-batches."""
 
     os.makedirs(request.local_path, exist_ok=True)
     export_time = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    filename = f"upload_{export_time}.csv.gz"
-    full_path = os.path.join(request.local_path, filename)
-
-    use_hot_copy = (
-        request.hot_copy_db
-        if request.hot_copy_db is not None
-        else request.min_last_updated_ts is None
-    )
-
-    # Run the sqlite extraction in an executor since it is blocking disk I/O
-    loop = asyncio.get_running_loop()
-    rows_written, max_last_updated_ts = await loop.run_in_executor(
-        None,
-        _extract_states_to_csv,
-        request.db_path,
-        full_path,
-        request.entity_like,
-        request.chunk_size,
-        request.min_last_updated_ts,
-        use_hot_copy,
-    )
-
-    if rows_written == 0:
-        raise ValueError("No rows were extracted from Home Assistant database.")
+    job_id = f"upload_{export_time}"
+    job_local_path = os.path.join(request.local_path, job_id)
+    os.makedirs(job_local_path, exist_ok=True)
+    
+    dbx_job_path = f"{request.dbx_volumes_path}/{job_id}"
 
     runtime_config = RuntimeSyncConfig(
         catalog=request.catalog,
@@ -335,17 +310,76 @@ async def run_sync_pipeline(request: SyncRequest) -> dict:
 
     await sqlwh.create_schema()
     await sqlwh.create_table()
-    upload_state = await sqlwh.upload_to_databricks(full_path, filename)
-    upsert_state = await sqlwh.upsert_new_data(filename)
 
-    if not request.keep_local_file and os.path.exists(full_path):
-        os.remove(full_path)
+    loop = asyncio.get_running_loop()
+    total_rows = 0
+    global_max_ts: float | None = None
+    last_state_id = 0
+    chunk_index = 0
+
+    while True:
+        chunk_index += 1
+        filename = f"part_{chunk_index:05d}.csv.gz"
+        chunk_output_path = os.path.join(job_local_path, filename)
+
+        rows_extracted, max_ts, next_state_id = await loop.run_in_executor(
+            None,
+            _extract_chunk_to_csv,
+            request.db_path,
+            chunk_output_path,
+            request.entity_like,
+            request.chunk_size,
+            request.min_last_updated_ts,
+            last_state_id,
+        )
+
+        if rows_extracted == 0:
+            if os.path.exists(chunk_output_path):
+                os.remove(chunk_output_path)
+            break
+
+        total_rows += rows_extracted
+        if max_ts is not None:
+            if global_max_ts is None or max_ts > global_max_ts:
+                global_max_ts = max_ts
+        last_state_id = next_state_id
+
+        # Upload
+        await sqlwh._upload_file(chunk_output_path, f"{dbx_job_path}/{filename}")
+        
+        # Cleanup local chunk immediately
+        if not request.keep_local_file and os.path.exists(chunk_output_path):
+            os.remove(chunk_output_path)
+
+    if total_rows == 0:
+        if os.path.exists(job_local_path):
+            try:
+                os.rmdir(job_local_path)
+            except OSError:
+                pass
+        raise ValueError("No rows were extracted from Home Assistant database.")
+
+    # Finish: Merge all chunks dynamically mapped explicitly 
+    upsert_state = await sqlwh.upsert_new_data(f"{dbx_job_path}/*.csv.gz")
+
+    # Cleanup Databricks Volume explicit ingest folder
+    try:
+        await sqlwh.delete_volume_folder(dbx_job_path)
+    except Exception:
+        pass
+
+    # Cleanup local Job Dir
+    if os.path.exists(job_local_path):
+        try:
+            os.rmdir(job_local_path)
+        except OSError:
+            pass
 
     return {
-        "filename": filename,
-        "rows": rows_written,
-        "used_hot_copy": use_hot_copy,
-        "max_last_updated_ts": max_last_updated_ts,
-        "upload_state": upload_state,
+        "filename": job_id,
+        "rows": total_rows,
+        "used_hot_copy": False,
+        "max_last_updated_ts": global_max_ts,
+        "upload_state": {"status": "SUCCESS"},
         "upsert_state": upsert_state,
     }
