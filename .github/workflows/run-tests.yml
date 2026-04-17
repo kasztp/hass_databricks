@@ -26,7 +26,7 @@ jobs:
         run: uv sync --extra test
 
       - name: Run tests
-        run: uv run pytest tests/ --cov=./hass_databricks --cov=./custom_components/hass_databricks --cov-config=./tests/.coveragerc --cov-report=xml --junitxml=junit.xml -o junit_family=legacy
+        run: uv run pytest --cov=./custom_components/hass_databricks --cov-report=xml --junitxml=junit.xml -o junit_family=legacy
 
       - name: Coverage summary
         run: uv run coverage report
