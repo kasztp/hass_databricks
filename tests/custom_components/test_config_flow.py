@@ -108,7 +108,7 @@ def test_options_flow_init_paths():
             CONF_AUTO_SYNC_INTERVAL_MINUTES: 60,
         }
     )
-    with mock.patch("homeassistant.config_entries.report_usage"):
+    with mock.patch("homeassistant.config_entries.report_usage", create=True):
         flow = HassDataBricksOptionsFlow(config_entry)
     flow.handler = "entry-1"
     flow.hass = SimpleNamespace(
