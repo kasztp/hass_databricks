@@ -1,6 +1,8 @@
 from unittest import mock
 
 import pytest
+import aiohttp
+import asyncio
 
 from custom_components.hass_databricks import pipeline
 
@@ -210,3 +212,164 @@ def test_run_sync_pipeline_keep_local_file_true_does_not_remove(
     mock_remove.assert_called_once_with(
         "/tmp/upload_2026-04-12-10-00-03/part_00002.csv.gz"
     )
+
+
+class MockResponse:
+    def __init__(self, status, text_data="{}", json_data=None):
+        self.status = status
+        self._text = text_data
+        self._json = json_data or {}
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        pass
+
+    async def text(self):
+        return self._text
+
+    async def json(self):
+        return self._json
+
+    def raise_for_status(self):
+        if self.status >= 400:
+            raise aiohttp.ClientResponseError(
+                request_info=mock.Mock(),
+                history=(),
+                status=self.status,
+                message="Error",
+            )
+
+
+def test_execute_sql():
+    cfg = pipeline.RuntimeSyncConfig("main", "ha", "states", "/tmp", "/dbx")
+
+    # Test without a provided session (creates its own)
+    target = pipeline.DatabricksTarget(
+        cfg,
+        server_hostname="host",
+        http_path="/sql/path",
+        access_token="token",
+    )
+
+    async def _run():
+        with mock.patch("aiohttp.ClientSession.post") as mock_post:
+            mock_post.return_value = MockResponse(
+                200, json_data={"status": {"state": "SUCCESS"}}
+            )
+
+            res = await target._execute_sql("SELECT 1")
+            assert res["status"]["state"] == "SUCCESS"
+            mock_post.assert_called_once()
+            args, kwargs = mock_post.call_args
+            assert kwargs["json"]["statement"] == "SELECT 1"
+            assert kwargs["headers"]["Authorization"] == "Bearer token"
+
+    asyncio.run(_run())
+
+
+def test_execute_sql_failure():
+    cfg = pipeline.RuntimeSyncConfig("main", "ha", "states", "/tmp", "/dbx")
+    target = pipeline.DatabricksTarget(
+        cfg,
+        server_hostname="host",
+        http_path="/sql/path",
+        access_token="token",
+    )
+
+    async def _run():
+        with mock.patch("aiohttp.ClientSession.post") as mock_post:
+            mock_post.return_value = MockResponse(
+                200, json_data={"status": {"state": "FAILED"}}
+            )
+            with pytest.raises(Exception, match="SQL execution failed"):
+                await target._execute_sql("SELECT 1")
+
+    asyncio.run(_run())
+
+
+def test_upload_file(tmp_path):
+    cfg = pipeline.RuntimeSyncConfig("main", "ha", "states", "/tmp", "/dbx")
+    target = pipeline.DatabricksTarget(
+        cfg,
+        server_hostname="host",
+        http_path="/sql/path",
+        access_token="token",
+    )
+
+    test_file = tmp_path / "test.csv"
+    test_file.write_text("1,2,3")
+
+    async def _run():
+        with mock.patch("aiohttp.ClientSession.put") as mock_put:
+            mock_put.return_value = MockResponse(200, text_data="ok")
+            res = await target._upload_file(str(test_file), "/api/path")
+            assert res["status"] == 200
+            assert res["response"] == "ok"
+
+    asyncio.run(_run())
+
+
+def test_delete_volume_folder():
+    cfg = pipeline.RuntimeSyncConfig("main", "ha", "states", "/tmp", "/dbx")
+    target = pipeline.DatabricksTarget(
+        cfg,
+        server_hostname="host",
+        http_path="/sql/path",
+        access_token="token",
+    )
+
+    async def _run():
+        with mock.patch("aiohttp.ClientSession.delete") as mock_delete:
+            mock_delete.return_value = MockResponse(200, text_data="deleted")
+            res = await target.delete_volume_folder("/api/path")
+            assert res["status"] == 200
+            assert res["response"] == "deleted"
+
+    asyncio.run(_run())
+
+
+def test_schema_errors(tmp_path):
+    source_db = tmp_path / "source.db"
+    out_csv = tmp_path / "out.csv.gz"
+
+    conn = pipeline.sqlite3.connect(source_db)
+    # create states but nothing else
+    conn.execute(
+        "CREATE TABLE states (state_id INTEGER PRIMARY KEY, metadata_id INTEGER, state TEXT, last_updated_ts REAL)"
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(Exception, match="Home Assistant metadata table not found"):
+        pipeline._extract_chunk_to_csv(str(source_db), str(out_csv), "sensor.%", 100)
+
+    # Remove states table to get the other error
+    conn = pipeline.sqlite3.connect(source_db)
+    conn.execute("DROP TABLE states")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(Exception, match="schema not found"):
+        pipeline._extract_chunk_to_csv(str(source_db), str(out_csv), "sensor.%", 100)
+
+
+def test_remove_path_coverage(tmp_path):
+    d = tmp_path / "dir"
+    d.mkdir()
+    f = tmp_path / "file.txt"
+    f.write_text("Hello")
+
+    # Test valid removes
+    pipeline._remove_path(str(d))
+    assert not d.exists()
+
+    pipeline._remove_path(str(f))
+    assert not f.exists()
+
+    # Test os error bypass
+    with mock.patch("os.remove", side_effect=OSError("Boom")):
+        f2 = tmp_path / "file2.txt"
+        f2.write_text("Hello")
+        pipeline._remove_path(str(f2))  # should not raise

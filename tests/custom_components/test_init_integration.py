@@ -322,3 +322,98 @@ def test_unload_calls_unsubscribe_when_present():
     asyncio.run(async_unload_entry(hass, entry))
 
     unsub.assert_called_once()
+
+
+def test_sync_recovers_availability_and_logs():
+    hass = _build_hass()
+    entry = _build_entry(auto_sync=False)
+    # We must mock that it was originally unavailable to hit lines 102-103
+    DummyStore.initial_data = {
+        SYNC_META_AVAILABLE: False,
+        "last_success_ts": 1000.0,
+    }
+    DummyStore.instances = []
+
+    async def _run():
+        with mock.patch("custom_components.hass_databricks.Store", DummyStore):
+            with mock.patch(
+                "custom_components.hass_databricks.pipeline.run_sync_pipeline",
+                return_value={
+                    "rows": 12,
+                    "filename": "upload.csv.gz",
+                    "max_last_updated_ts": 1700.0,
+                    "used_hot_copy": False,
+                },
+            ):
+                with mock.patch(
+                    "custom_components.hass_databricks.async_get_clientsession"
+                ):
+                    await async_setup_entry(hass, entry)
+                    handler = hass.services.async_register.call_args.args[2]
+                    await handler(SimpleNamespace(data={}))
+
+    asyncio.run(_run())
+
+    meta = hass.data[DOMAIN][entry.entry_id]["sync_meta"]
+    assert meta[SYNC_META_AVAILABLE] is True
+    assert meta[SYNC_META_LAST_STATUS] == "success"
+
+
+def test_import_error_in_sync():
+    """Test importing pipeline fails with HomeAssistantError."""
+    # To hit line 143-144, sys.modules must fail import
+    hass = _build_hass()
+    entry = _build_entry(auto_sync=False)
+    DummyStore.initial_data = {}
+    DummyStore.instances = []
+
+    async def _run():
+        with mock.patch("custom_components.hass_databricks.Store", DummyStore):
+            with mock.patch.dict(
+                "sys.modules", {"custom_components.hass_databricks.pipeline": None}
+            ):
+                with mock.patch(
+                    "custom_components.hass_databricks.async_get_clientsession"
+                ):
+                    await async_setup_entry(hass, entry)
+                    handler = hass.services.async_register.call_args.args[2]
+                    with pytest.raises(
+                        Exception,
+                        match="Sync dependencies are unavailable in this Home Assistant runtime",
+                    ):
+                        await handler(SimpleNamespace(data={}))
+
+    asyncio.run(_run())
+
+
+def test_run_sync_pipeline_exception_without_reauth():
+    # Target line 217-218 (except Exception on reauthentication)
+    hass = _build_hass()
+    entry = _build_entry(auto_sync=False)
+    DummyStore.initial_data = {}
+    DummyStore.instances = []
+
+    async def _run():
+        with mock.patch("custom_components.hass_databricks.Store", DummyStore):
+            with mock.patch(
+                "custom_components.hass_databricks.pipeline.run_sync_pipeline",
+                side_effect=Exception(
+                    "Unauthorized"
+                ),  # this triggers _start_reauth_if_needed
+            ):
+                with mock.patch(
+                    "custom_components.hass_databricks.async_get_clientsession"
+                ):
+                    await async_setup_entry(hass, entry)
+                    handler = hass.services.async_register.call_args.args[2]
+
+                    # mock reauth so it throws Exception
+                    with mock.patch.object(
+                        hass.config_entries.flow,
+                        "async_init",
+                        side_effect=Exception("reauth broken"),
+                    ):
+                        with pytest.raises(Exception, match="Unauthorized"):
+                            await handler(SimpleNamespace(data={}))
+
+    asyncio.run(_run())

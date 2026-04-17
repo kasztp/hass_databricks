@@ -1,4 +1,10 @@
-# hass_databricks
+# HASS Databricks
+
+[![Tests](https://github.com/kasztp/hass_databricks/actions/workflows/run-tests.yml/badge.svg)](https://github.com/kasztp/hass_databricks/actions/workflows/run-tests.yml)
+[![Pylint](https://github.com/kasztp/hass_databricks/actions/workflows/pylint.yml/badge.svg)](https://github.com/kasztp/hass_databricks/actions/workflows/pylint.yml)
+[![Hassfest](https://github.com/kasztp/hass_databricks/actions/workflows/hassfest.yml/badge.svg)](https://github.com/kasztp/hass_databricks/actions/workflows/hassfest.yml)
+[![HACS](https://github.com/kasztp/hass_databricks/actions/workflows/hacs.yml/badge.svg)](https://github.com/kasztp/hass_databricks/actions/workflows/hacs.yml)
+[![Codecov](https://codecov.io/gh/kasztp/hass_databricks/branch/main/graph/badge.svg)](https://codecov.io/gh/kasztp/hass_databricks)
 
 ![HASS Databricks](custom_components/hass_databricks/brand/logo.png)
 
@@ -6,7 +12,7 @@ Tools to sync Home Assistant state history to Databricks as a Home Assistant cus
 
 ## Home Assistant Custom Component
 
-This repository now includes a Home Assistant custom integration in:
+This repository includes a Home Assistant custom integration in:
 
 - custom_components/hass_databricks/
 
@@ -40,6 +46,15 @@ HACS metadata is provided in:
 3. Restart Home Assistant
 
 ## Configuration
+
+### Databricks Workspace Configuration
+
+Before connecting the integration to your Databricks environment, ensure the following setup is complete in your workspace:
+
+
+1. **Setup Target Volume**: Create a volume within the desired Catalog and Schema. This will act as a transient staging directory during micro-batch synchronization. Ensure you record the exact Volume path (e.g., `/Volumes/main/home_assistant/ingest`) to use during setup.
+2. **Generate Access Token**: Create a Personal Access Token (PAT) via *User Settings → Developer → Access Tokens* or configure a Service Principal. This token requires `CREATE TABLE`, `CREATE SCHEMA`, and `WRITE VOLUME` privileges within your target catalog.
+3. **Acquire Compute Details**: The integration utilizes Databricks REST API endpoints for performing cluster-side MERGE aggregations. Retrieve both the **Server Hostname** and the **HTTP Path** from your target SQL Warehouse or designated compute cluster via its *Connection Details* tab.
 
 ### Setup via Home Assistant UI
 
@@ -82,7 +97,7 @@ The service hass_databricks.sync:
 2. Iteratively writes these chunks to transient local `csv.gz` buffers.
 3. Instantly uploads each buffered chunk to a tracking folder inside Databricks Volumes.
 4. Deletes the local chunk buffer immediately (prohibiting memory creep and massive local storage exhaustion).
-5. Once all chunks are ingested, triggers a wild-card MERGE on the cluster side for high-performance ingestion into the target table.
+5. Once all chunks are ingested, triggers a MERGE operation on the cluster side for high-performance ingestion into the target table.
 6. Maps Databricks APIs to safely delete the transient volume tracking folder on completion.
 
 ### Incremental Sync Behavior
@@ -183,9 +198,23 @@ This repository includes GitHub Actions workflows for Home Assistant ecosystem c
 
 ## Development
 
-This project uses uv:
+This project uses `uv` for dependency management alongside `ruff` for rapid code linting and formatting.
+
+### Developer Setup
+
+To ensure strict code quality, configure your GitHub pre-commit hooks, which contain automated `ruff` bindings, immediately after downloading the dependencies:
 
 ```bash
 uv sync --extra test
+uv run pre-commit install
+```
+
+This ensures that `ruff --fix` and `ruff-format` protect your commits natively.
+
+### Running Tests
+
+Execute the standardized Pytest suite leveraging your isolated `uv` environment:
+
+```bash
 uv run pytest -q
 ```
