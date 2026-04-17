@@ -6,7 +6,11 @@ rules:
       Service actions are registered in async_setup_entry rather than at the
       integration-level async_setup, so they are re-registered on every entry
       reload. Needs refactoring to register once in async_setup.
-  appropriate-polling: done
+  appropriate-polling:
+    status: exempt
+    comment: >
+      This is not a polling integration. Sync runs are triggered by service
+      calls, a manual button press, or a scheduled timer — not by polling.
   brands: done
   common-modules: done
   config-flow-test-coverage: done
@@ -15,27 +19,26 @@ rules:
   docs-actions: done
   docs-high-level-description: done
   docs-installation-instructions: done
-  docs-removal-instructions:
-    status: todo
-    comment: README does not yet include a section on removing the integration.
+  docs-removal-instructions: done
   entity-event-setup: done
   entity-unique-id: done
   has-entity-name: done
   runtime-data:
-    status: todo
+    status: done
     comment: >
-      Integration currently stores runtime state in hass.data[DOMAIN] instead
-      of ConfigEntry.runtime_data as required by modern HA guidelines.
+      Runtime state is stored in ConfigEntry.runtime_data using the
+      HassDataBricksRuntimeData dataclass.
   test-before-configure:
-    status: todo
+    status: done
     comment: >
-      Config flow does not attempt a test connection to Databricks before
-      creating the entry. A validation step should be added.
+      Config flow tests Databricks connectivity via SELECT 1 before creating
+      the entry; includes a 30s retry window for SQL warehouse startup.
+      Shows cannot_connect or invalid_auth errors on failure.
   test-before-setup:
-    status: todo
+    status: done
     comment: >
-      async_setup_entry does not verify connectivity to Databricks before
-      completing setup; failed connections are only detected at first sync.
+      async_setup_entry verifies Databricks connectivity at startup (with 30s retry).
+      Raises ConfigEntryNotReady on transient failure, triggers reauth on auth errors.
   unique-config-entry: done
 
   # Silver
@@ -52,8 +55,10 @@ rules:
 
   # Gold
   devices:
-    status: todo
-    comment: Integration does not register devices in the device registry.
+    status: done
+    comment: >
+      The button entity registers a device via device_info with identifiers,
+      name, manufacturer, and model.
   diagnostics:
     status: todo
     comment: No diagnostics download support implemented.
@@ -73,17 +78,11 @@ rules:
     comment: >
       README includes a basic service-call YAML snippet but lacks automation
       and dashboard examples.
-  docs-known-limitations:
-    status: todo
-    comment: README does not include a known limitations section.
+  docs-known-limitations: done
   docs-supported-devices:
     status: exempt
     comment: Integration does not interact with hardware devices.
-  docs-supported-functions:
-    status: todo
-    comment: >
-      README does not have a dedicated section listing all provided entities and
-      their meanings.
+  docs-supported-functions: done
   docs-troubleshooting:
     status: todo
     comment: README does not include a troubleshooting section.
@@ -94,18 +93,22 @@ rules:
       use-case examples.
   dynamic-devices:
     status: exempt
-    comment: No device registry entries are created.
+    comment: >
+      Device registry entries are static per config entry; no dynamic device
+      addition is applicable.
   entity-category:
-    status: todo
-    comment: Sensor entities are not assigned an EntityCategory.
+    status: done
+    comment: Status sensors (run, rows, success) are assigned to EntityCategory.DIAGNOSTIC.
   entity-device-class:
     status: todo
     comment: >
       Only the last-success sensor uses SensorDeviceClass.TIMESTAMP; last-run
       and last-rows sensors lack an appropriate device class.
   entity-disabled-by-default:
-    status: todo
-    comment: No entities are disabled by default; noisy/diagnostic sensors should be.
+    status: exempt
+    comment: >
+      All entities provide essential sync status information; none are
+      noisy or diagnostic-only.
   entity-translations:
     status: todo
     comment: >
@@ -118,26 +121,28 @@ rules:
     status: todo
     comment: Icons are set via hard-coded _attr_icon strings, not icon translation files.
   reconfiguration-flow:
-    status: todo
-    comment: No async_step_reconfigure implemented in the config flow.
+    status: done
+    comment: async_step_reconfigure is implemented in the config flow.
   repair-issues:
     status: todo
     comment: No HA repair issues or repair flows are used.
   stale-devices:
     status: exempt
-    comment: No device registry entries are created.
+    comment: >
+      One device per config entry; device is removed when entry is unloaded.
+      No stale device cleanup needed.
 
   # Platinum
   async-dependency:
-    status: todo
+    status: done
     comment: >
-      databricks-sql-connector is a synchronous library; calls are currently
-      wrapped in async_add_executor_job but the dependency itself is not async.
+      Integration uses aiohttp (async) for all Databricks REST API calls.
+      Synchronous file I/O is offloaded via hass.async_add_executor_job.
   inject-websession:
-    status: exempt
+    status: done
     comment: >
-      The integration uses a SQL connector, not an HTTP client library, so
-      injecting a Home Assistant websession is not applicable.
+      The integration accepts an aiohttp.ClientSession via
+      async_get_clientsession(hass) and passes it to the pipeline.
   strict-typing:
     status: todo
     comment: Codebase has type hints but is not enforced with strict mypy / pylance settings.

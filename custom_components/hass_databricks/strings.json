@@ -31,6 +31,10 @@
     },
     "abort": {
       "already_configured": "This Databricks target is already configured."
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Databricks after retrying for ~30 seconds. Please ensure the SQL warehouse is running and verify the server hostname and HTTP path.",
+      "invalid_auth": "Authentication failed. Please check your access token."
     }
   },
   "options": {
@@ -51,6 +55,13 @@
           "local_path": "Local directory used for temporary parquet staging",
           "auto_sync_interval_minutes": "How often the integration triggers sync automatically"
         }
+      }
+    }
+  },
+  "entity": {
+    "button": {
+      "sync_now": {
+        "name": "Databricks Sync"
       }
     }
   }

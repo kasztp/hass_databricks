@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import timedelta
 import logging
 import time
+from typing import Any, Callable
+
+import aiohttp
 
 from homeassistant.config_entries import ConfigEntry, SOURCE_REAUTH
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
@@ -56,21 +60,119 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS: list[Platform] = [Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON]
+
+
+@dataclass
+class HassDataBricksRuntimeData:
+    """Runtime data for a hass_databricks config entry."""
+
+    store: Any
+    sync_meta: dict = field(default_factory=dict)
+    sync_func: Callable | None = None
+    unsub_auto_sync: Callable | None = None
+
+
+async def async_test_databricks_connection(
+    server_hostname: str,
+    http_path: str,
+    access_token: str,
+    session: aiohttp.ClientSession | None = None,
+    timeout_seconds: int = 30,
+) -> dict[str, Any]:
+    """Test connectivity to a Databricks SQL warehouse with SELECT 1.
+
+    Retries with exponential backoff for up to ``timeout_seconds`` to allow
+    the Databricks SQL warehouse to wake from an idle state.  Auth errors
+    (401/403) are returned immediately without retry.
+    """
+    import asyncio as _asyncio
+
+    close_session = False
+    if session is None:
+        session = aiohttp.ClientSession()
+        close_session = True
+
+    url = f"https://{server_hostname}/api/2.0/sql/statements"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    warehouse_id = http_path.strip("/").split("/")[-1]
+    payload = {
+        "warehouse_id": warehouse_id,
+        "statement": "SELECT 1",
+        "wait_timeout": "10s",
+    }
+
+    delays = [2, 4, 8, 16]  # exponential back-off steps
+    attempts = 1 + len(delays)  # first try + retries
+    last_error: str = "cannot_connect"
+
+    try:
+        for attempt in range(attempts):
+            try:
+                async with session.post(url, headers=headers, json=payload) as resp:
+                    if resp.status in (401, 403):
+                        return {"success": False, "error": "invalid_auth"}
+                    resp.raise_for_status()
+                    result = await resp.json()
+                    state = result.get("status", {}).get("state", "")
+                    if state in ("FAILED", "CANCELED"):
+                        last_error = "cannot_connect"
+                    else:
+                        return {"success": True}
+            except aiohttp.ClientResponseError as err:
+                if err.status in (401, 403):
+                    return {"success": False, "error": "invalid_auth"}
+                last_error = "cannot_connect"
+            except Exception:
+                last_error = "cannot_connect"
+
+            # Don't sleep after the last attempt
+            if attempt < len(delays):
+                await _asyncio.sleep(delays[attempt])
+
+        return {"success": False, "error": last_error}
+    finally:
+        if close_session:
+            await session.close()
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up hass_databricks from a config entry."""
+    # Test connection before completing setup
+    session = async_get_clientsession(hass)
+    conn_result = await async_test_databricks_connection(
+        server_hostname=entry.data[CONF_SERVER_HOSTNAME],
+        http_path=entry.data[CONF_HTTP_PATH],
+        access_token=entry.data[CONF_ACCESS_TOKEN],
+        session=session,
+    )
+    if not conn_result["success"]:
+        if conn_result["error"] == "invalid_auth":
+            await hass.config_entries.flow.async_init(
+                DOMAIN,
+                context={"source": SOURCE_REAUTH, "entry_id": entry.entry_id},
+                data={
+                    CONF_SERVER_HOSTNAME: entry.data[CONF_SERVER_HOSTNAME],
+                    CONF_HTTP_PATH: entry.data[CONF_HTTP_PATH],
+                },
+            )
+            return False
+        raise ConfigEntryNotReady(
+            f"Cannot connect to Databricks: {conn_result.get('error', 'unknown')}"
+        )
+
     store = Store[dict](hass, STORAGE_VERSION, f"{STORAGE_KEY_PREFIX}.{entry.entry_id}")
     sync_meta = await store.async_load() or {}
 
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {
-        "entry": entry,
-        "unsub_auto_sync": None,
-        "store": store,
-        "sync_meta": sync_meta,
-    }
+    runtime_data = HassDataBricksRuntimeData(store=store, sync_meta=sync_meta)
+    entry.runtime_data = runtime_data
+
+    # Track loaded entries for service lifecycle
+    hass.data.setdefault(DOMAIN, set())
+    hass.data[DOMAIN].add(entry.entry_id)
 
     async def _record_sync_result(
         *,
@@ -85,7 +187,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         error: str | None = None,
     ) -> None:
         """Record one sync run for Activity/Logbook and automations."""
-        sync_meta = hass.data[DOMAIN][entry.entry_id]["sync_meta"]
+        sync_meta = entry.runtime_data.sync_meta
 
         # Log once when service becomes unavailable
         if not success:
@@ -184,9 +286,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass=hass,
         )
 
-        last_success_ts = hass.data[DOMAIN][entry.entry_id]["sync_meta"].get(
-            SYNC_META_LAST_SUCCESS_TS
-        )
+        last_success_ts = entry.runtime_data.sync_meta.get(SYNC_META_LAST_SUCCESS_TS)
         if last_success_ts is not None:
             lookback_seconds = DEFAULT_INCREMENTAL_LOOKBACK_MINUTES * 60
             request.min_last_updated_ts = float(last_success_ts) - lookback_seconds
@@ -217,7 +317,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 await _start_reauth_if_needed(err)
             except Exception:
                 _LOGGER.debug("Failed to start reauthentication flow", exc_info=True)
-            sync_meta = hass.data[DOMAIN][entry.entry_id]["sync_meta"]
+            sync_meta = entry.runtime_data.sync_meta
             sync_meta[SYNC_META_LAST_RUN_TS] = run_ts
             sync_meta[SYNC_META_LAST_STATUS] = "failed"
             sync_meta[SYNC_META_LAST_TRIGGER] = trigger
@@ -243,7 +343,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             result["filename"],
             result["rows"],
         )
-        sync_meta = hass.data[DOMAIN][entry.entry_id]["sync_meta"]
+        sync_meta = entry.runtime_data.sync_meta
         new_last_success_ts = float(result.get("max_last_updated_ts") or time.time())
         sync_meta[SYNC_META_LAST_RUN_TS] = run_ts
         sync_meta[SYNC_META_LAST_STATUS] = "success"
@@ -266,6 +366,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             rows=int(result["rows"]),
             filename=str(result["filename"]),
         )
+
+    entry.runtime_data.sync_func = _run_sync
 
     async def handle_sync(call: ServiceCall) -> None:
         await _run_sync(call.data, "service")
@@ -292,7 +394,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         unsub_auto_sync = async_track_time_interval(
             hass, _handle_scheduled_sync, interval
         )
-        hass.data[DOMAIN][entry.entry_id]["unsub_auto_sync"] = unsub_auto_sync
+        entry.runtime_data.unsub_auto_sync = unsub_auto_sync
         _LOGGER.debug(
             "Automatic sync enabled for %s every %s minutes",
             entry.entry_id,
@@ -316,9 +418,14 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    entry_data = hass.data[DOMAIN].pop(entry.entry_id, None)
-    if entry_data and entry_data.get("unsub_auto_sync") is not None:
-        entry_data["unsub_auto_sync"]()
-    if not hass.data[DOMAIN]:
+
+    if hasattr(entry, "runtime_data") and entry.runtime_data is not None:
+        if entry.runtime_data.unsub_auto_sync is not None:
+            entry.runtime_data.unsub_auto_sync()
+
+    loaded_entries = hass.data.get(DOMAIN, set())
+    loaded_entries.discard(entry.entry_id)
+    if not loaded_entries:
         hass.services.async_remove(DOMAIN, SERVICE_SYNC)
+
     return unload_ok

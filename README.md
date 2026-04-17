@@ -10,22 +10,30 @@
 
 Tools to sync Home Assistant state history to Databricks as a Home Assistant custom integration.
 
-## Home Assistant Custom Component
+## Project Architecture
 
-This repository includes a Home Assistant custom integration in:
+This repository contains two separate but related codebases that share a common goal: syncing Home Assistant state data to Databricks.
 
-- custom_components/hass_databricks/
+### Home Assistant Custom Integration (`custom_components/hass_databricks/`)
+
+A self-contained Home Assistant integration designed to run safely on resource-constrained HAOS devices (e.g., Raspberry Pi, Home Assistant Green). It uses only lightweight, built-in dependencies (`sqlite3`, `csv`, `gzip`, `aiohttp`) and implements a non-blocking, streaming micro-batch pipeline optimized for the Home Assistant event loop.
 
 Key files:
 
-- custom_components/hass_databricks/manifest.json
-- custom_components/hass_databricks/__init__.py
-- custom_components/hass_databricks/services.yaml
-- custom_components/hass_databricks/pipeline.py
+- `custom_components/hass_databricks/manifest.json`
+- `custom_components/hass_databricks/__init__.py`
+- `custom_components/hass_databricks/services.yaml`
+- `custom_components/hass_databricks/pipeline.py`
 
 HACS metadata is provided in:
 
-- hacs.json
+- `hacs.json`
+
+### Standalone Python Package (`hass_databricks/`) — ⚠️ Deprecated
+
+> **Warning:** This package is deprecated. All active development has moved to the Home Assistant custom integration above. The standalone package is retained for reference only and will be removed in a future release.
+
+The original standalone Python package was intended for use in Notebooks or as a CLI tool. It has been superseded by the integration's streaming micro-batch pipeline, which offers superior performance, non-blocking I/O, and immediate resource cleanup — all without requiring additional dependencies such as `pandas` or `pydantic`.
 
 ## Installation
 
@@ -62,6 +70,17 @@ Before connecting the integration to your Databricks environment, ensure the fol
 2. Click **Add Integration**
 3. Search for **HASS Databricks**
 4. Fill in the required connection parameters
+
+The integration will attempt to connect to your Databricks SQL Warehouse. If the warehouse is in an idle state (sleeping), the setup will automatically **retry for up to 30 seconds** to allow it to wake up.
+
+### Reconfiguration
+
+If you need to update your Access Token or Move to a different SQL Warehouse:
+
+1. Go to **Settings** → **Devices & Services**
+2. Find the **HASS Databricks** card
+3. Click the three dots menu → **Reconfigure**
+4. Update the necessary fields and click **Submit**
 
 ### Configuration Parameters
 
@@ -163,7 +182,14 @@ The integration exposes the following entities:
 - `sensor.hass_databricks_last_rows`: Number of rows in the last successful sync
 - `sensor.hass_databricks_last_success`: Timestamp of the last successful sync
 
+> [!NOTE]
+> These sensors are assigned to the **Diagnostic** category and appear in the Diagnostic section of the device page in the Home Assistant UI.
+
 Sensors are marked unavailable if the most recent sync failed (reconnect when sync succeeds).
+
+### Manual Trigger
+
+- `button.databricks_sync`: A manual trigger entity that allows you to start a synchronization run immediately from the Home Assistant UI.
 
 ## Removal
 
@@ -188,6 +214,12 @@ If manually installed, remove the directory `<config>/custom_components/hass_dat
 **Symptoms: "Sync dependencies unavailable"**
 - **Cause**: Integration dependencies not installed
 - **Solution**: Ensure your network is active and HA meets baseline built-in package needs. (Previously, this plugin required heavy dependencies, but it now uses pure Python `csv`, `gzip`, and `aiohttp` to run natively!)
+
+## Known Limitations
+
+- **Schema Evolution**: The integration handles basic schema creation but does not automatically perform `ALTER TABLE` operations if the Home Assistant database schema changes significantly.
+- **Micro-Batching**: While performance is high, sync is not real-time. Data is pushed in batches according to your configured interval.
+- **SQL Warehouse Only**: While it may work with standard All-Purpose clusters, it is optimized for and tested against **Databricks SQL Warehouses** using the SQL Statements API.
 
 ## CI / Validation
 

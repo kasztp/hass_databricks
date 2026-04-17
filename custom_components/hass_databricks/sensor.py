@@ -5,13 +5,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+)
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
-    DOMAIN,
     EVENT_SYNC_RESULT,
     PARALLEL_UPDATES,
     SYNC_META_LAST_ERROR,
@@ -32,7 +35,7 @@ def _iso_from_ts(value: Any) -> str | None:
         return None
     try:
         return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
 
 
@@ -65,7 +68,7 @@ class HassDatabricksBaseSensor(SensorEntity):
     @property
     def sync_meta(self) -> dict[str, Any]:
         """Return current sync metadata for this config entry."""
-        return self.hass.data[DOMAIN][self._entry.entry_id]["sync_meta"]
+        return self._entry.runtime_data.sync_meta
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to sync result events for immediate state refresh."""
@@ -95,6 +98,7 @@ class HassDatabricksLastRunSensor(HassDatabricksBaseSensor):
         super().__init__(hass, entry)
         self._attr_unique_id = f"{entry.entry_id}_last_run"
         self._attr_name = "Last Run"
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_native_value = "never"
         self._attr_extra_state_attributes = {}
         self._refresh_from_meta()
@@ -124,6 +128,7 @@ class HassDatabricksLastRowsSensor(HassDatabricksBaseSensor):
         super().__init__(hass, entry)
         self._attr_unique_id = f"{entry.entry_id}_last_rows"
         self._attr_name = "Last Rows"
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_native_value = None
         self._refresh_from_meta()
 
@@ -143,6 +148,7 @@ class HassDatabricksLastSuccessSensor(HassDatabricksBaseSensor):
         super().__init__(hass, entry)
         self._attr_unique_id = f"{entry.entry_id}_last_success"
         self._attr_name = "Last Success"
+        self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_native_value = None
         self._refresh_from_meta()
 

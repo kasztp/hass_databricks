@@ -1,11 +1,13 @@
 import asyncio
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest import mock
 
 import pytest
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 
 from custom_components.hass_databricks import (
+    HassDataBricksRuntimeData,
     _async_update_listener,
     async_setup_entry,
     async_unload_entry,
@@ -74,7 +76,7 @@ def _build_hass():
 
 
 def _build_entry(auto_sync=False):
-    return SimpleNamespace(
+    entry = SimpleNamespace(
         entry_id="entry-1",
         data={
             CONF_SERVER_HOSTNAME: "adb.example",
@@ -91,7 +93,25 @@ def _build_entry(auto_sync=False):
         },
         async_on_unload=mock.MagicMock(),
         add_update_listener=mock.MagicMock(return_value=mock.MagicMock()),
+        runtime_data=None,
     )
+    return entry
+
+
+# Helper for setup tests
+
+
+@contextmanager
+def _mock_conn_success():
+    """Mock both the connection test and session creation for setup tests."""
+    with mock.patch(
+        "custom_components.hass_databricks.async_get_clientsession",
+    ):
+        with mock.patch(
+            "custom_components.hass_databricks.async_test_databricks_connection",
+            return_value={"success": True},
+        ):
+            yield
 
 
 def test_setup_registers_service_and_unload_removes_it():
@@ -101,12 +121,14 @@ def test_setup_registers_service_and_unload_removes_it():
     DummyStore.instances = []
 
     with mock.patch("custom_components.hass_databricks.Store", DummyStore):
-        ok = asyncio.run(async_setup_entry(hass, entry))
+        with _mock_conn_success():
+            ok = asyncio.run(async_setup_entry(hass, entry))
 
     assert ok is True
     assert DOMAIN in hass.data
     hass.services.async_register.assert_called_once()
     assert hass.services.async_register.call_args.args[1] == SERVICE_SYNC
+    assert isinstance(entry.runtime_data, HassDataBricksRuntimeData)
 
     unload_ok = asyncio.run(async_unload_entry(hass, entry))
     assert unload_ok is True
@@ -121,25 +143,26 @@ def test_service_handler_success_updates_sync_meta():
 
     async def _run():
         with mock.patch("custom_components.hass_databricks.Store", DummyStore):
-            with mock.patch(
-                "custom_components.hass_databricks.pipeline.run_sync_pipeline",
-                return_value={
-                    "rows": 12,
-                    "filename": "upload.csv.gz",
-                    "max_last_updated_ts": 1700.0,
-                    "used_hot_copy": False,
-                },
-            ):
+            with _mock_conn_success():
                 with mock.patch(
-                    "custom_components.hass_databricks.async_get_clientsession"
+                    "custom_components.hass_databricks.pipeline.run_sync_pipeline",
+                    return_value={
+                        "rows": 12,
+                        "filename": "upload.csv.gz",
+                        "max_last_updated_ts": 1700.0,
+                        "used_hot_copy": False,
+                    },
                 ):
-                    await async_setup_entry(hass, entry)
-                    handler = hass.services.async_register.call_args.args[2]
-                    await handler(SimpleNamespace(data={}))
+                    with mock.patch(
+                        "custom_components.hass_databricks.async_get_clientsession"
+                    ):
+                        await async_setup_entry(hass, entry)
+                        handler = hass.services.async_register.call_args.args[2]
+                        await handler(SimpleNamespace(data={}))
 
     asyncio.run(_run())
 
-    meta = hass.data[DOMAIN][entry.entry_id]["sync_meta"]
+    meta = entry.runtime_data.sync_meta
     assert meta[SYNC_META_LAST_STATUS] == "success"
     assert meta.get(SYNC_META_AVAILABLE, True) is True
     assert DummyStore.instances[-1].saved
@@ -153,21 +176,22 @@ def test_service_handler_failure_sets_unavailable_and_triggers_reauth():
 
     async def _run():
         with mock.patch("custom_components.hass_databricks.Store", DummyStore):
-            with mock.patch(
-                "custom_components.hass_databricks.pipeline.run_sync_pipeline",
-                side_effect=Exception("authentication failed: invalid token"),
-            ):
+            with _mock_conn_success():
                 with mock.patch(
-                    "custom_components.hass_databricks.async_get_clientsession"
+                    "custom_components.hass_databricks.pipeline.run_sync_pipeline",
+                    side_effect=Exception("authentication failed: invalid token"),
                 ):
-                    await async_setup_entry(hass, entry)
-                    handler = hass.services.async_register.call_args.args[2]
-                    with pytest.raises(Exception, match="authentication failed"):
-                        await handler(SimpleNamespace(data={}))
+                    with mock.patch(
+                        "custom_components.hass_databricks.async_get_clientsession"
+                    ):
+                        await async_setup_entry(hass, entry)
+                        handler = hass.services.async_register.call_args.args[2]
+                        with pytest.raises(Exception, match="authentication failed"):
+                            await handler(SimpleNamespace(data={}))
 
     asyncio.run(_run())
 
-    meta = hass.data[DOMAIN][entry.entry_id]["sync_meta"]
+    meta = entry.runtime_data.sync_meta
     assert meta[SYNC_META_LAST_STATUS] == "failed"
     assert meta[SYNC_META_AVAILABLE] is False
     hass.config_entries.flow.async_init.assert_awaited_once()
@@ -182,15 +206,16 @@ def test_auto_sync_registration_stores_unsubscribe_callback():
 
     async def _run():
         with mock.patch("custom_components.hass_databricks.Store", DummyStore):
-            with mock.patch(
-                "custom_components.hass_databricks.async_track_time_interval",
-                return_value=unsub,
-            ):
-                await async_setup_entry(hass, entry)
+            with _mock_conn_success():
+                with mock.patch(
+                    "custom_components.hass_databricks.async_track_time_interval",
+                    return_value=unsub,
+                ):
+                    await async_setup_entry(hass, entry)
 
     asyncio.run(_run())
 
-    assert hass.data[DOMAIN][entry.entry_id]["unsub_auto_sync"] is unsub
+    assert entry.runtime_data.unsub_auto_sync is unsub
 
 
 def test_service_handler_uses_incremental_lookback_when_last_success_exists():
@@ -212,16 +237,17 @@ def test_service_handler_uses_incremental_lookback_when_last_success_exists():
 
     async def _run():
         with mock.patch("custom_components.hass_databricks.Store", DummyStore):
-            with mock.patch(
-                "custom_components.hass_databricks.pipeline.run_sync_pipeline",
-                side_effect=_fake_pipeline,
-            ):
+            with _mock_conn_success():
                 with mock.patch(
-                    "custom_components.hass_databricks.async_get_clientsession"
+                    "custom_components.hass_databricks.pipeline.run_sync_pipeline",
+                    side_effect=_fake_pipeline,
                 ):
-                    await async_setup_entry(hass, entry)
-                    handler = hass.services.async_register.call_args.args[2]
-                    await handler(SimpleNamespace(data={}))
+                    with mock.patch(
+                        "custom_components.hass_databricks.async_get_clientsession"
+                    ):
+                        await async_setup_entry(hass, entry)
+                        handler = hass.services.async_register.call_args.args[2]
+                        await handler(SimpleNamespace(data={}))
 
     asyncio.run(_run())
     assert captured["min_last_updated_ts"] == 1400.0
@@ -235,17 +261,18 @@ def test_failure_with_non_auth_error_does_not_start_reauth():
 
     async def _run():
         with mock.patch("custom_components.hass_databricks.Store", DummyStore):
-            with mock.patch(
-                "custom_components.hass_databricks.pipeline.run_sync_pipeline",
-                side_effect=Exception("disk full"),
-            ):
+            with _mock_conn_success():
                 with mock.patch(
-                    "custom_components.hass_databricks.async_get_clientsession"
+                    "custom_components.hass_databricks.pipeline.run_sync_pipeline",
+                    side_effect=Exception("disk full"),
                 ):
-                    await async_setup_entry(hass, entry)
-                    handler = hass.services.async_register.call_args.args[2]
-                    with pytest.raises(Exception, match="disk full"):
-                        await handler(SimpleNamespace(data={}))
+                    with mock.patch(
+                        "custom_components.hass_databricks.async_get_clientsession"
+                    ):
+                        await async_setup_entry(hass, entry)
+                        handler = hass.services.async_register.call_args.args[2]
+                        with pytest.raises(Exception, match="disk full"):
+                            await handler(SimpleNamespace(data={}))
 
     asyncio.run(_run())
     hass.config_entries.flow.async_init.assert_not_awaited()
@@ -262,17 +289,18 @@ def test_failure_when_reauth_init_raises_is_handled():
 
     async def _run():
         with mock.patch("custom_components.hass_databricks.Store", DummyStore):
-            with mock.patch(
-                "custom_components.hass_databricks.pipeline.run_sync_pipeline",
-                side_effect=Exception("auth failed"),
-            ):
+            with _mock_conn_success():
                 with mock.patch(
-                    "custom_components.hass_databricks.async_get_clientsession"
+                    "custom_components.hass_databricks.pipeline.run_sync_pipeline",
+                    side_effect=Exception("auth failed"),
                 ):
-                    await async_setup_entry(hass, entry)
-                    handler = hass.services.async_register.call_args.args[2]
-                    with pytest.raises(Exception, match="auth failed"):
-                        await handler(SimpleNamespace(data={}))
+                    with mock.patch(
+                        "custom_components.hass_databricks.async_get_clientsession"
+                    ):
+                        await async_setup_entry(hass, entry)
+                        handler = hass.services.async_register.call_args.args[2]
+                        with pytest.raises(Exception, match="auth failed"):
+                            await handler(SimpleNamespace(data={}))
 
     asyncio.run(_run())
 
@@ -290,16 +318,17 @@ def test_scheduled_sync_homeassistant_error_logged():
 
     async def _run():
         with mock.patch("custom_components.hass_databricks.Store", DummyStore):
-            with mock.patch(
-                "custom_components.hass_databricks.async_track_time_interval",
-                side_effect=_capture_scheduler,
-            ):
+            with _mock_conn_success():
                 with mock.patch(
-                    "custom_components.hass_databricks.pipeline.run_sync_pipeline",
-                    side_effect=HomeAssistantError("boom"),
+                    "custom_components.hass_databricks.async_track_time_interval",
+                    side_effect=_capture_scheduler,
                 ):
-                    await async_setup_entry(hass, entry)
-                    await scheduled["callback"](None)
+                    with mock.patch(
+                        "custom_components.hass_databricks.pipeline.run_sync_pipeline",
+                        side_effect=HomeAssistantError("boom"),
+                    ):
+                        await async_setup_entry(hass, entry)
+                        await scheduled["callback"](None)
 
     asyncio.run(_run())
 
@@ -317,7 +346,10 @@ def test_unload_calls_unsubscribe_when_present():
     hass = _build_hass()
     entry = _build_entry(auto_sync=False)
     unsub = mock.MagicMock()
-    hass.data = {DOMAIN: {entry.entry_id: {"unsub_auto_sync": unsub}}}
+    entry.runtime_data = HassDataBricksRuntimeData(
+        store=mock.MagicMock(), unsub_auto_sync=unsub
+    )
+    hass.data = {DOMAIN: {"entry-1"}}
 
     asyncio.run(async_unload_entry(hass, entry))
 
@@ -336,25 +368,26 @@ def test_sync_recovers_availability_and_logs():
 
     async def _run():
         with mock.patch("custom_components.hass_databricks.Store", DummyStore):
-            with mock.patch(
-                "custom_components.hass_databricks.pipeline.run_sync_pipeline",
-                return_value={
-                    "rows": 12,
-                    "filename": "upload.csv.gz",
-                    "max_last_updated_ts": 1700.0,
-                    "used_hot_copy": False,
-                },
-            ):
+            with _mock_conn_success():
                 with mock.patch(
-                    "custom_components.hass_databricks.async_get_clientsession"
+                    "custom_components.hass_databricks.pipeline.run_sync_pipeline",
+                    return_value={
+                        "rows": 12,
+                        "filename": "upload.csv.gz",
+                        "max_last_updated_ts": 1700.0,
+                        "used_hot_copy": False,
+                    },
                 ):
-                    await async_setup_entry(hass, entry)
-                    handler = hass.services.async_register.call_args.args[2]
-                    await handler(SimpleNamespace(data={}))
+                    with mock.patch(
+                        "custom_components.hass_databricks.async_get_clientsession"
+                    ):
+                        await async_setup_entry(hass, entry)
+                        handler = hass.services.async_register.call_args.args[2]
+                        await handler(SimpleNamespace(data={}))
 
     asyncio.run(_run())
 
-    meta = hass.data[DOMAIN][entry.entry_id]["sync_meta"]
+    meta = entry.runtime_data.sync_meta
     assert meta[SYNC_META_AVAILABLE] is True
     assert meta[SYNC_META_LAST_STATUS] == "success"
 
@@ -369,19 +402,20 @@ def test_import_error_in_sync():
 
     async def _run():
         with mock.patch("custom_components.hass_databricks.Store", DummyStore):
-            with mock.patch.dict(
-                "sys.modules", {"custom_components.hass_databricks.pipeline": None}
-            ):
-                with mock.patch(
-                    "custom_components.hass_databricks.async_get_clientsession"
+            with _mock_conn_success():
+                with mock.patch.dict(
+                    "sys.modules", {"custom_components.hass_databricks.pipeline": None}
                 ):
-                    await async_setup_entry(hass, entry)
-                    handler = hass.services.async_register.call_args.args[2]
-                    with pytest.raises(
-                        Exception,
-                        match="Sync dependencies are unavailable in this Home Assistant runtime",
+                    with mock.patch(
+                        "custom_components.hass_databricks.async_get_clientsession"
                     ):
-                        await handler(SimpleNamespace(data={}))
+                        await async_setup_entry(hass, entry)
+                        handler = hass.services.async_register.call_args.args[2]
+                        with pytest.raises(
+                            Exception,
+                            match="Sync dependencies are unavailable in this Home Assistant runtime",
+                        ):
+                            await handler(SimpleNamespace(data={}))
 
     asyncio.run(_run())
 
@@ -395,25 +429,68 @@ def test_run_sync_pipeline_exception_without_reauth():
 
     async def _run():
         with mock.patch("custom_components.hass_databricks.Store", DummyStore):
-            with mock.patch(
-                "custom_components.hass_databricks.pipeline.run_sync_pipeline",
-                side_effect=Exception(
-                    "Unauthorized"
-                ),  # this triggers _start_reauth_if_needed
-            ):
+            with _mock_conn_success():
                 with mock.patch(
-                    "custom_components.hass_databricks.async_get_clientsession"
+                    "custom_components.hass_databricks.pipeline.run_sync_pipeline",
+                    side_effect=Exception(
+                        "Unauthorized"
+                    ),  # this triggers _start_reauth_if_needed
                 ):
-                    await async_setup_entry(hass, entry)
-                    handler = hass.services.async_register.call_args.args[2]
-
-                    # mock reauth so it throws Exception
-                    with mock.patch.object(
-                        hass.config_entries.flow,
-                        "async_init",
-                        side_effect=Exception("reauth broken"),
+                    with mock.patch(
+                        "custom_components.hass_databricks.async_get_clientsession"
                     ):
-                        with pytest.raises(Exception, match="Unauthorized"):
-                            await handler(SimpleNamespace(data={}))
+                        await async_setup_entry(hass, entry)
+                        handler = hass.services.async_register.call_args.args[2]
+
+                        # mock reauth so it throws Exception
+                        with mock.patch.object(
+                            hass.config_entries.flow,
+                            "async_init",
+                            side_effect=Exception("reauth broken"),
+                        ):
+                            with pytest.raises(Exception, match="Unauthorized"):
+                                await handler(SimpleNamespace(data={}))
+
+    asyncio.run(_run())
+
+
+# --- New tests for Bronze requirements ---
+
+
+def test_setup_entry_raises_config_entry_not_ready_on_connection_failure():
+    """test-before-setup: ConfigEntryNotReady when Databricks is unreachable."""
+    hass = _build_hass()
+    entry = _build_entry(auto_sync=False)
+
+    async def _run():
+        with mock.patch(
+            "custom_components.hass_databricks.async_get_clientsession",
+        ):
+            with mock.patch(
+                "custom_components.hass_databricks.async_test_databricks_connection",
+                return_value={"success": False, "error": "cannot_connect"},
+            ):
+                with pytest.raises(ConfigEntryNotReady):
+                    await async_setup_entry(hass, entry)
+
+    asyncio.run(_run())
+
+
+def test_setup_entry_triggers_reauth_on_invalid_auth():
+    """test-before-setup: triggers reauth when credentials are invalid."""
+    hass = _build_hass()
+    entry = _build_entry(auto_sync=False)
+
+    async def _run():
+        with mock.patch(
+            "custom_components.hass_databricks.async_get_clientsession",
+        ):
+            with mock.patch(
+                "custom_components.hass_databricks.async_test_databricks_connection",
+                return_value={"success": False, "error": "invalid_auth"},
+            ):
+                result = await async_setup_entry(hass, entry)
+                assert result is False
+                hass.config_entries.flow.async_init.assert_awaited_once()
 
     asyncio.run(_run())
