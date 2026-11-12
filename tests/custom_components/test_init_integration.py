@@ -23,6 +23,7 @@ from custom_components.hass_databricks.const import (
     CONF_SERVER_HOSTNAME,
     CONF_TABLE,
     DOMAIN,
+    CONF_SYNC_METADATA,
     SERVICE_SYNC,
     SYNC_META_AVAILABLE,
     SYNC_META_LAST_STATUS,
@@ -34,6 +35,16 @@ def issue_registry():
     """hass is mocked in these tests, so stub the repairs registry."""
     with mock.patch("custom_components.hass_databricks.ir") as ir:
         yield ir
+
+
+@pytest.fixture(autouse=True)
+def metadata_sync():
+    """Stub the metadata sync; dedicated tests below exercise its wiring."""
+    with mock.patch(
+        "custom_components.hass_databricks.metadata.run_metadata_sync",
+        new=mock.AsyncMock(return_value={"tables": {"ha_floors": 1}, "errors": {}}),
+    ) as m:
+        yield m
 
 
 class DummyStore:
@@ -510,3 +521,75 @@ def test_setup_entry_triggers_reauth_on_invalid_auth():
                 hass.config_entries.flow.async_init.assert_awaited_once()
 
     asyncio.run(_run())
+
+
+def _run_handler(entry, pipeline_effect, options=None):
+    """Set up the entry and call the sync service once; return the raised error."""
+    hass = _build_hass()
+    if options:
+        entry.options.update(options)
+    DummyStore.initial_data = {}
+    DummyStore.instances = []
+    raised = []
+
+    async def _run():
+        with mock.patch("custom_components.hass_databricks.Store", DummyStore):
+            with _mock_conn_success():
+                with mock.patch(
+                    "custom_components.hass_databricks.pipeline.run_sync_pipeline",
+                    **pipeline_effect,
+                ):
+                    await async_setup_entry(hass, entry)
+                    handler = hass.services.async_register.call_args.args[2]
+                    try:
+                        await handler(SimpleNamespace(data={}))
+                    except Exception as err:  # pylint: disable=broad-except
+                        raised.append(err)
+
+    asyncio.run(_run())
+    return hass, raised
+
+
+_OK = {
+    "return_value": {
+        "rows": 1,
+        "filename": "f",
+        "max_last_updated_ts": 1.0,
+        "used_hot_copy": False,
+    }
+}
+
+
+def test_metadata_result_is_in_sync_event(metadata_sync):
+    hass, raised = _run_handler(_build_entry(), _OK)
+    assert not raised
+    metadata_sync.assert_awaited_once()
+    event_data = hass.bus.async_fire.call_args.args[1]
+    assert event_data["metadata"] == {"tables": {"ha_floors": 1}, "errors": {}}
+
+
+def test_metadata_failure_does_not_fail_sensor_sync(metadata_sync):
+    metadata_sync.side_effect = RuntimeError("boom")
+    entry = _build_entry()
+    hass, raised = _run_handler(entry, _OK)
+    assert not raised
+    assert entry.runtime_data.sync_meta[SYNC_META_LAST_STATUS] == "success"
+    assert hass.bus.async_fire.call_args.args[1]["metadata"]["errors"] == {
+        "all": "boom"
+    }
+
+
+def test_sensor_no_rows_does_not_stop_metadata(metadata_sync):
+    entry = _build_entry()
+    _, raised = _run_handler(
+        entry, {"side_effect": ValueError("No rows were extracted")}
+    )
+    metadata_sync.assert_awaited_once()
+    assert isinstance(raised[0], ValueError)
+    assert entry.runtime_data.sync_meta[SYNC_META_LAST_STATUS] == "failed"
+
+
+def test_metadata_sync_skipped_when_option_off(metadata_sync):
+    _, raised = _run_handler(_build_entry(), _OK, {CONF_SYNC_METADATA: False})
+    assert not raised
+    metadata_sync.assert_not_awaited()

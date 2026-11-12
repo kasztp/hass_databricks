@@ -119,6 +119,28 @@ The service hass_databricks.sync:
 5. Once all chunks are ingested, triggers a MERGE operation on the cluster side for high-performance ingestion into the target table.
 6. Maps Databricks APIs to safely delete the transient volume tracking folder on completion.
 
+### Rooms, Floors and Entity Metadata
+
+On every sync (option **Sync rooms, floors and entity metadata**, on by default) four small snapshot
+tables are written next to the sensor table, in the same catalog and schema. Each is fully replaced
+on every sync (`CREATE OR REPLACE TABLE`) and has a `synced_at TIMESTAMP` column.
+
+| Table | Content |
+|---|---|
+| `ha_floors` | `floor_id`, `name`, `level`, `aliases`, `icon` |
+| `ha_areas` | `area_id`, `name`, `floor_id`, `aliases`, `icon`, `labels` (names). Includes areas with no entities |
+| `ha_entities` | One row per registry entity (all domains): `entity_id`, `friendly_name`, `area_id` (own, else its device's), `device_id`, `device_name`, `domain`, `device_class`, `unit`, `state_class`, `platform`, `labels`, `disabled` |
+| `ha_energy_config` | Energy dashboard preferences, one row per statistic: `role` (`grid_import`, `grid_export`, `solar`, `battery_out`, `battery_in`, `gas`, `water`, `device_consumption`), `stat_id`, `money_stat_id`, `price_entity_id`, `fixed_price`, `source_index`, `name` |
+
+A metadata failure never fails the sensor sync, and metadata is synced even when the sensor sync
+finds no new rows. The per-table row counts or errors are included as `metadata` in the
+`hass_databricks_sync_result` event.
+
+> **Privacy:** this uploads the names of your rooms, floors, devices and entities to your own
+> Databricks workspace. Turn the option off if you do not want that.
+
+Requires Home Assistant 2024.4 or newer (floor registry).
+
 ### Incremental Sync Behavior
 
 After the first successful run, the integration stores the last successful source timestamp.

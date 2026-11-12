@@ -36,6 +36,7 @@ CONF_KEEP_LOCAL_FILE = "keep_local_file"
 CONF_HOT_COPY_DB = "hot_copy_db"
 CONF_AUTO_SYNC_ENABLED = "auto_sync_enabled"
 CONF_AUTO_SYNC_INTERVAL_MINUTES = "auto_sync_interval_minutes"
+CONF_SYNC_METADATA = "sync_metadata"
 
 DEFAULT_DB_FILENAME = "home-assistant_v2.db"
 DEFAULT_ENTITY_LIKE = "sensor.%"
@@ -43,6 +44,7 @@ DEFAULT_CHUNK_SIZE = 50_000
 DEFAULT_LOCAL_PATH = "/tmp/"
 DEFAULT_AUTO_SYNC_ENABLED = True
 DEFAULT_AUTO_SYNC_INTERVAL_MINUTES = 60
+DEFAULT_SYNC_METADATA = True
 
 # Parallel updates
 PARALLEL_UPDATES = 1
