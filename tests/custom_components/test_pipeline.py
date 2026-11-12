@@ -312,6 +312,7 @@ def test_upload_file(tmp_path):
 
 
 def test_delete_volume_folder():
+    """Files are deleted first (Files API rejects non-empty dirs), across pages."""
     cfg = pipeline.RuntimeSyncConfig("main", "ha", "states", "/tmp", "/dbx")
     target = pipeline.DatabricksTarget(
         cfg,
@@ -319,13 +320,36 @@ def test_delete_volume_folder():
         http_path="/sql/path",
         access_token="token",
     )
+    pages = [
+        MockResponse(
+            200,
+            json_data={
+                "contents": [
+                    {"path": "/api/path/a.csv.gz", "is_directory": False},
+                    {"path": "/api/path/sub", "is_directory": True},
+                ],
+                "next_page_token": "t2",
+            },
+        ),
+        MockResponse(200, json_data={"contents": [{"path": "/api/path/b.csv.gz"}]}),
+    ]
 
     async def _run():
-        with mock.patch("aiohttp.ClientSession.delete") as mock_delete:
+        with (
+            mock.patch("aiohttp.ClientSession.get", side_effect=pages) as mock_get,
+            mock.patch("aiohttp.ClientSession.delete") as mock_delete,
+        ):
             mock_delete.return_value = MockResponse(200, text_data="deleted")
             res = await target.delete_volume_folder("/api/path")
             assert res["status"] == 200
             assert res["response"] == "deleted"
+            urls = [c.args[0] for c in mock_delete.call_args_list]
+            assert urls == [
+                "https://host/api/2.0/fs/files/api/path/a.csv.gz",
+                "https://host/api/2.0/fs/files/api/path/b.csv.gz",
+                "https://host/api/2.0/fs/directories/api/path",
+            ]
+            assert mock_get.call_args_list[1].kwargs["params"] == {"page_token": "t2"}
 
     asyncio.run(_run())
 

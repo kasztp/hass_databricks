@@ -139,7 +139,7 @@ finds no new rows. The per-table row counts or errors are included as `metadata`
 > **Privacy:** this uploads the names of your rooms, floors, devices and entities to your own
 > Databricks workspace. Turn the option off if you do not want that.
 
-Requires Home Assistant 2024.4 or newer (floor registry).
+Requires Home Assistant 2024.9 or newer.
 
 ### Incremental Sync Behavior
 
