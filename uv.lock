@@ -673,7 +673,7 @@ wheels = [
 
 [[package]]
 name = "hass-databricks"
-version = "1.1.0"
+version = "1.2.0"
 source = { editable = "." }
 
 [package.optional-dependencies]
@@ -687,7 +687,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "homeassistant", marker = "extra == 'test'", specifier = ">=2024.1.0" },
+    { name = "homeassistant", marker = "extra == 'test'", specifier = ">=2024.9.0" },
     { name = "pylint", marker = "extra == 'test'", specifier = ">=3.3.1" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.3.3" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=6.0.0" },

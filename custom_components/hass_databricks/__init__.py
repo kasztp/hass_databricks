@@ -34,6 +34,8 @@ from .const import (
     CONF_LOCAL_PATH,
     CONF_SCHEMA,
     CONF_SERVER_HOSTNAME,
+    CONF_SYNC_METADATA,
+    DEFAULT_SYNC_METADATA,
     CONF_TABLE,
     DEFAULT_AUTO_SYNC_ENABLED,
     DEFAULT_AUTO_SYNC_INTERVAL_MINUTES,
@@ -204,6 +206,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         rows: int | None = None,
         filename: str | None = None,
         error: str | None = None,
+        metadata: dict | None = None,
     ) -> None:
         """Record one sync run for Activity/Logbook and automations."""
         sync_meta = entry.runtime_data.sync_meta
@@ -271,6 +274,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "rows": rows,
                 "filename": filename,
                 "error": error,
+                "metadata": metadata,
             },
         )
 
@@ -345,6 +349,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 },
             )
 
+        # Metadata runs first and never raises, so it is independent of the
+        # sensor sync (which raises when it extracts zero rows).
+        metadata_result = None
+        if opts.get(CONF_SYNC_METADATA, DEFAULT_SYNC_METADATA):
+            try:
+                from .metadata import run_metadata_sync
+
+                metadata_result = await run_metadata_sync(request)
+                for table, table_err in metadata_result["errors"].items():
+                    _LOGGER.warning("Metadata sync of %s failed: %s", table, table_err)
+            except Exception as err:  # pylint: disable=broad-except
+                _LOGGER.warning("Metadata sync failed: %s", err)
+                metadata_result = {"tables": {}, "errors": {"all": str(err)}}
+
         _LOGGER.info("Starting hass_databricks sync service")
         try:
             result = await run_sync_pipeline(request)
@@ -371,6 +389,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 run_ts=run_ts,
                 last_success_ts=sync_meta.get(SYNC_META_LAST_SUCCESS_TS),
                 error=str(err),
+                metadata=metadata_result,
             )
             raise
 
@@ -401,6 +420,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             last_success_ts=new_last_success_ts,
             rows=int(result["rows"]),
             filename=str(result["filename"]),
+            metadata=metadata_result,
         )
 
     entry.runtime_data.sync_func = _run_sync

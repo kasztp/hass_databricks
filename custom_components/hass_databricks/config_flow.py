@@ -11,6 +11,8 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_AUTO_SYNC_ENABLED,
+    CONF_SYNC_METADATA,
+    DEFAULT_SYNC_METADATA,
     CONF_AUTO_SYNC_INTERVAL_MINUTES,
     CONF_CATALOG,
     CONF_CHUNK_SIZE,
@@ -231,6 +233,10 @@ class HassDataBricksOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                     CONF_LOCAL_PATH,
                     default=current.get(CONF_LOCAL_PATH, DEFAULT_LOCAL_PATH),
                 ): str,
+                vol.Optional(
+                    CONF_SYNC_METADATA,
+                    default=current.get(CONF_SYNC_METADATA, DEFAULT_SYNC_METADATA),
+                ): bool,
                 vol.Optional(
                     CONF_AUTO_SYNC_ENABLED,
                     default=current.get(

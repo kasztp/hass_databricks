@@ -46,6 +46,7 @@
           "chunk_size": "Chunk Size",
           "keep_local_file": "Keep Local Parquet File After Upload",
           "local_path": "Local Staging Path",
+          "sync_metadata": "Sync rooms, floors and entity metadata",
           "auto_sync_enabled": "Enable Automatic Periodic Sync",
           "auto_sync_interval_minutes": "Automatic Sync Interval (minutes)"
         },
@@ -53,6 +54,7 @@
           "entity_like": "SQL LIKE pattern to filter entities, e.g. sensor.%",
           "chunk_size": "Number of rows per extraction chunk (1 000 – 500 000)",
           "local_path": "Local directory used for temporary parquet staging",
+          "sync_metadata": "Uploads room, floor, entity and Energy configuration names to your Databricks workspace",
           "auto_sync_interval_minutes": "How often the integration triggers sync automatically"
         }
       }

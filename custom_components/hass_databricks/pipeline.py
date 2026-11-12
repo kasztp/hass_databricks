@@ -162,7 +162,11 @@ class DatabricksTarget:
                 await session.close()
 
     async def delete_volume_folder(self, databricks_path: str) -> dict:
-        """Delete a folder from Databricks Volumes asynchronously."""
+        """Delete a Volumes folder and the files in it.
+
+        The Files API refuses to delete a non-empty directory, so the (flat)
+        folder contents are deleted first.
+        """
         close_session = False
         session = self._session
         if session is None:
@@ -170,12 +174,29 @@ class DatabricksTarget:
             close_session = True
 
         try:
-            url = f"https://{self._server_hostname}/api/2.0/fs/directories{databricks_path}"
+            base = f"https://{self._server_hostname}/api/2.0/fs"
+            dir_url = f"{base}/directories{databricks_path}"
             headers = {
                 "Authorization": f"Bearer {self._access_token}",
                 "Content-Type": "application/json",
             }
-            async with session.delete(url, headers=headers) as resp:
+            page_token = None
+            while True:
+                params = {"page_token": page_token} if page_token else None
+                async with session.get(dir_url, headers=headers, params=params) as resp:
+                    await _raise_for_status(resp)
+                    listing = await resp.json()
+                for item in listing.get("contents", []):
+                    if item.get("is_directory"):
+                        continue
+                    async with session.delete(
+                        f"{base}/files{item['path']}", headers=headers
+                    ) as resp:
+                        await _raise_for_status(resp)
+                page_token = listing.get("next_page_token")
+                if not page_token:
+                    break
+            async with session.delete(dir_url, headers=headers) as resp:
                 await _raise_for_status(resp)
                 text = await resp.text()
                 return {"status": resp.status, "response": text}
