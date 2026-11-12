@@ -336,3 +336,30 @@ def test_folder_delete_failure_is_ignored(tmp_path):
         with mock.patch.object(metadata, "DatabricksTarget", return_value=target):
             result = asyncio.run(metadata.run_metadata_sync(_request(tmp_path)))
     assert result["errors"] == {}
+
+
+def test_energy_mapping_gas_and_water_with_prices():
+    prefs = {
+        "energy_sources": [
+            {
+                "type": "gas",
+                "stat_energy_from": "sensor.gas",
+                "stat_cost": "sensor.gas_cost",
+                "entity_energy_price": None,
+                "number_energy_price": 1.5,
+            },
+            {"type": "water", "stat_energy_from": "sensor.water"},
+        ],
+        "device_consumption": [],
+    }
+    rows = {r["role"]: r for r in metadata.build_energy_rows(prefs)}
+    assert rows["gas"]["stat_id"] == "sensor.gas"
+    assert rows["gas"]["money_stat_id"] == "sensor.gas_cost"
+    assert rows["gas"]["fixed_price"] == 1.5
+    assert rows["water"]["source_index"] == 1
+
+
+def test_energy_preferences_none_when_energy_not_importable():
+    hass = SimpleNamespace(config=SimpleNamespace(components={"energy"}))
+    with mock.patch.dict("sys.modules", {"homeassistant.components.energy.data": None}):
+        assert asyncio.run(metadata._energy_preferences(hass)) is None
