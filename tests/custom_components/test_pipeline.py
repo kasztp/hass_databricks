@@ -373,3 +373,29 @@ def test_remove_path_coverage(tmp_path):
         f2 = tmp_path / "file2.txt"
         f2.write_text("Hello")
         pipeline._remove_path(str(f2))  # should not raise
+
+
+def test_execute_sql_400_keeps_databricks_error_body():
+    """The 400 response body must reach the caller, not just 'Bad Request'."""
+    cfg = pipeline.RuntimeSyncConfig("main", "ha", "states", "/tmp", "/dbx")
+    target = pipeline.DatabricksTarget(
+        cfg, server_hostname="host", http_path="/sql/path", access_token="token"
+    )
+    resp = MockResponse(400, text_data='{"message": "Warehouse abc does not exist"}')
+    resp.reason = "Bad Request"
+    resp.request_info = mock.Mock()
+    resp.history = ()
+    resp.headers = {}
+
+    async def _run():
+        with mock.patch("aiohttp.ClientSession.post", return_value=resp):
+            with pytest.raises(aiohttp.ClientResponseError) as exc:
+                await target._execute_sql("SELECT 1")
+        assert exc.value.status == 400
+        assert "Warehouse abc does not exist" in str(exc.value)
+
+    asyncio.run(_run())
+
+
+def test_raise_for_status_passes_on_success():
+    asyncio.run(pipeline._raise_for_status(MockResponse(200)))

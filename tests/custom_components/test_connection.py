@@ -172,3 +172,22 @@ def test_connection_sends_warehouse_id_from_http_path():
     payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
     assert payload["warehouse_id"] == "abc123def"
     assert payload["statement"] == "SELECT 1"
+
+
+def test_connection_400_logs_response_body(caplog):
+    """A 400 must log Databricks' error body so the cause is diagnosable."""
+    session = mock.AsyncMock()
+    resp = _make_response(400)
+    resp.text = mock.AsyncMock(return_value="Warehouse abc does not exist")
+    resp.raise_for_status = mock.MagicMock(
+        side_effect=aiohttp.ClientResponseError(mock.Mock(), (), status=400)
+    )
+    session.post = mock.MagicMock(return_value=_make_cm(resp))
+
+    with mock.patch("asyncio.sleep", new=mock.AsyncMock()):
+        result = asyncio.run(
+            async_test_databricks_connection("host", "/path", "token", session=session)
+        )
+
+    assert result == {"success": False, "error": "cannot_connect"}
+    assert "Warehouse abc does not exist" in caplog.text

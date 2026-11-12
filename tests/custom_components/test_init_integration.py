@@ -466,7 +466,9 @@ def test_run_sync_pipeline_exception_without_reauth():
 # --- New tests for Bronze requirements ---
 
 
-def test_setup_entry_raises_config_entry_not_ready_on_connection_failure():
+def test_setup_entry_raises_config_entry_not_ready_on_connection_failure(
+    issue_registry,
+):
     """test-before-setup: ConfigEntryNotReady when Databricks is unreachable."""
     hass = _build_hass()
     entry = _build_entry(auto_sync=False)
@@ -483,6 +485,11 @@ def test_setup_entry_raises_config_entry_not_ready_on_connection_failure():
                     await async_setup_entry(hass, entry)
 
     asyncio.run(_run())
+    issue_registry.async_create_issue.assert_called_once()
+    assert (
+        issue_registry.async_create_issue.call_args.kwargs["translation_key"]
+        == "sync_failed"
+    )
 
 
 def test_setup_entry_triggers_reauth_on_invalid_auth():
