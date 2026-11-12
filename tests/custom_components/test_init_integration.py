@@ -29,6 +29,13 @@ from custom_components.hass_databricks.const import (
 )
 
 
+@pytest.fixture(autouse=True)
+def issue_registry():
+    """hass is mocked in these tests, so stub the repairs registry."""
+    with mock.patch("custom_components.hass_databricks.ir") as ir:
+        yield ir
+
+
 class DummyStore:
     initial_data = {}
     instances = []
@@ -168,7 +175,7 @@ def test_service_handler_success_updates_sync_meta():
     assert DummyStore.instances[-1].saved
 
 
-def test_service_handler_failure_sets_unavailable_and_triggers_reauth():
+def test_service_handler_failure_sets_unavailable_and_triggers_reauth(issue_registry):
     hass = _build_hass()
     entry = _build_entry(auto_sync=False)
     DummyStore.initial_data = {}
@@ -195,6 +202,7 @@ def test_service_handler_failure_sets_unavailable_and_triggers_reauth():
     assert meta[SYNC_META_LAST_STATUS] == "failed"
     assert meta[SYNC_META_AVAILABLE] is False
     hass.config_entries.flow.async_init.assert_awaited_once()
+    issue_registry.async_create_issue.assert_called_once()
 
 
 def test_auto_sync_registration_stores_unsubscribe_callback():
@@ -356,7 +364,7 @@ def test_unload_calls_unsubscribe_when_present():
     unsub.assert_called_once()
 
 
-def test_sync_recovers_availability_and_logs():
+def test_sync_recovers_availability_and_logs(issue_registry):
     hass = _build_hass()
     entry = _build_entry(auto_sync=False)
     # We must mock that it was originally unavailable to hit lines 102-103
@@ -390,6 +398,7 @@ def test_sync_recovers_availability_and_logs():
     meta = entry.runtime_data.sync_meta
     assert meta[SYNC_META_AVAILABLE] is True
     assert meta[SYNC_META_LAST_STATUS] == "success"
+    issue_registry.async_delete_issue.assert_called_once()
 
 
 def test_import_error_in_sync():
@@ -457,7 +466,9 @@ def test_run_sync_pipeline_exception_without_reauth():
 # --- New tests for Bronze requirements ---
 
 
-def test_setup_entry_raises_config_entry_not_ready_on_connection_failure():
+def test_setup_entry_raises_config_entry_not_ready_on_connection_failure(
+    issue_registry,
+):
     """test-before-setup: ConfigEntryNotReady when Databricks is unreachable."""
     hass = _build_hass()
     entry = _build_entry(auto_sync=False)
@@ -474,6 +485,11 @@ def test_setup_entry_raises_config_entry_not_ready_on_connection_failure():
                     await async_setup_entry(hass, entry)
 
     asyncio.run(_run())
+    issue_registry.async_create_issue.assert_called_once()
+    assert (
+        issue_registry.async_create_issue.call_args.kwargs["translation_key"]
+        == "sync_failed"
+    )
 
 
 def test_setup_entry_triggers_reauth_on_invalid_auth():

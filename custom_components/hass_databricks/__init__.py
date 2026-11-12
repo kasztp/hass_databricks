@@ -13,6 +13,7 @@ import aiohttp
 from homeassistant.config_entries import ConfigEntry, SOURCE_REAUTH
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
@@ -115,6 +116,12 @@ async def async_test_databricks_connection(
                 async with session.post(url, headers=headers, json=payload) as resp:
                     if resp.status in (401, 403):
                         return {"success": False, "error": "invalid_auth"}
+                    if resp.status >= 400:
+                        _LOGGER.warning(
+                            "Databricks connection test returned %s: %s",
+                            resp.status,
+                            (await resp.text())[:500],
+                        )
                     resp.raise_for_status()
                     result = await resp.json()
                     state = result.get("status", {}).get("state", "")
@@ -160,6 +167,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 },
             )
             return False
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            f"sync_failed_{entry.entry_id}",
+            is_fixable=False,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="sync_failed",
+            translation_placeholders={
+                "target": "connection test",
+                "error": str(conn_result.get("error", "unknown")),
+            },
+        )
         raise ConfigEntryNotReady(
             f"Cannot connect to Databricks: {conn_result.get('error', 'unknown')}"
         )
@@ -190,6 +209,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         sync_meta = entry.runtime_data.sync_meta
 
         # Log once when service becomes unavailable
+        issue_id = f"sync_failed_{entry.entry_id}"
+        if success:
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+        else:
+            ir.async_create_issue(
+                hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.ERROR,
+                translation_key="sync_failed",
+                translation_placeholders={
+                    "target": target,
+                    "error": error or "unknown",
+                },
+            )
+
         if not success:
             was_available = sync_meta.get(SYNC_META_AVAILABLE, True)
             if was_available:

@@ -5,15 +5,25 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import os
-import shutil
 import sqlite3
-import tempfile
 import asyncio
-from typing import Optional
 import csv
 import gzip
 import aiohttp
 from typing import Any
+
+
+async def _raise_for_status(resp: aiohttp.ClientResponse) -> None:
+    """Like raise_for_status, but keeps Databricks' error body in the message."""
+    if resp.status >= 400:
+        body = (await resp.text())[:500]
+        raise aiohttp.ClientResponseError(
+            resp.request_info,
+            resp.history,
+            status=resp.status,
+            message=f"{resp.reason}: {body}",
+            headers=resp.headers,
+        )
 
 
 @dataclass
@@ -119,7 +129,7 @@ class DatabricksTarget:
                 "wait_timeout": "30s",
             }
             async with session.post(url, headers=headers, json=payload) as resp:
-                resp.raise_for_status()
+                await _raise_for_status(resp)
                 result = await resp.json()
                 if result.get("status", {}).get("state") in ("FAILED", "CANCELED"):
                     raise Exception(f"SQL execution failed: {result}")
@@ -144,7 +154,7 @@ class DatabricksTarget:
             }
             file_bytes = await _async_run_job(self._hass, _read_file_content, file_path)
             async with session.put(url, headers=headers, data=file_bytes) as resp:
-                resp.raise_for_status()
+                await _raise_for_status(resp)
                 text = await resp.text()
                 return {"status": resp.status, "response": text}
         finally:
@@ -166,7 +176,7 @@ class DatabricksTarget:
                 "Content-Type": "application/json",
             }
             async with session.delete(url, headers=headers) as resp:
-                resp.raise_for_status()
+                await _raise_for_status(resp)
                 text = await resp.text()
                 return {"status": resp.status, "response": text}
         finally:
