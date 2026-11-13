@@ -24,6 +24,8 @@ from custom_components.hass_databricks.const import (
     CONF_TABLE,
     DOMAIN,
     CONF_SYNC_METADATA,
+    CONF_SYNC_STATISTICS,
+    SYNC_META_LAST_STATS_TS,
     SERVICE_SYNC,
     SYNC_META_AVAILABLE,
     SYNC_META_LAST_STATUS,
@@ -43,6 +45,16 @@ def metadata_sync():
     with mock.patch(
         "custom_components.hass_databricks.metadata.run_metadata_sync",
         new=mock.AsyncMock(return_value={"tables": {"ha_floors": 1}, "errors": {}}),
+    ) as m:
+        yield m
+
+
+@pytest.fixture(autouse=True)
+def statistics_sync():
+    """Stub the long-term statistics sync; dedicated tests exercise the wiring."""
+    with mock.patch(
+        "custom_components.hass_databricks.long_term_stats.run_statistics_sync",
+        new=mock.AsyncMock(return_value={"rows": 5, "max_start_ts": 5000.0}),
     ) as m:
         yield m
 
@@ -523,12 +535,13 @@ def test_setup_entry_triggers_reauth_on_invalid_auth():
     asyncio.run(_run())
 
 
-def _run_handler(entry, pipeline_effect, options=None):
+def _run_handler(entry, pipeline_effect, options=None, keep_store=False):
     """Set up the entry and call the sync service once; return the raised error."""
     hass = _build_hass()
     if options:
         entry.options.update(options)
-    DummyStore.initial_data = {}
+    if not keep_store:
+        DummyStore.initial_data = {}
     DummyStore.instances = []
     raised = []
 
@@ -593,3 +606,43 @@ def test_metadata_sync_skipped_when_option_off(metadata_sync):
     _, raised = _run_handler(_build_entry(), _OK, {CONF_SYNC_METADATA: False})
     assert not raised
     metadata_sync.assert_not_awaited()
+
+
+def test_statistics_first_run_is_full_and_stores_high_water_mark(statistics_sync):
+    entry = _build_entry()
+    hass, raised = _run_handler(entry, _OK)
+    assert not raised
+    assert statistics_sync.await_args.args[1] is None  # no watermark: full history
+    assert entry.runtime_data.sync_meta[SYNC_META_LAST_STATS_TS] == 5000.0
+    assert hass.bus.async_fire.call_args.args[1]["statistics"]["rows"] == 5
+
+
+def test_statistics_next_run_uses_watermark_minus_lookback(statistics_sync):
+    entry = _build_entry()
+    DummyStore.initial_data = {SYNC_META_LAST_STATS_TS: 100000.0}
+    _, raised = _run_handler(entry, _OK, keep_store=True)
+    assert not raised
+    assert statistics_sync.await_args.args[1] == 100000.0 - 24 * 3600
+
+
+def test_statistics_failure_does_not_fail_sensor_sync(statistics_sync):
+    statistics_sync.side_effect = RuntimeError("stats boom")
+    entry = _build_entry()
+    hass, raised = _run_handler(entry, _OK)
+    assert not raised
+    assert entry.runtime_data.sync_meta[SYNC_META_LAST_STATUS] == "success"
+    assert SYNC_META_LAST_STATS_TS not in entry.runtime_data.sync_meta
+    assert hass.bus.async_fire.call_args.args[1]["statistics"]["error"] == "stats boom"
+
+
+def test_statistics_with_no_new_rows_keeps_watermark(statistics_sync):
+    statistics_sync.return_value = {"rows": 0, "max_start_ts": None}
+    entry = _build_entry()
+    _run_handler(entry, _OK)
+    assert SYNC_META_LAST_STATS_TS not in entry.runtime_data.sync_meta
+
+
+def test_statistics_skipped_when_option_off(statistics_sync):
+    _, raised = _run_handler(_build_entry(), _OK, {CONF_SYNC_STATISTICS: False})
+    assert not raised
+    statistics_sync.assert_not_awaited()
