@@ -35,7 +35,11 @@ from .const import (
     CONF_SCHEMA,
     CONF_SERVER_HOSTNAME,
     CONF_SYNC_METADATA,
+    CONF_SYNC_STATISTICS,
+    DEFAULT_STATS_LOOKBACK_HOURS,
     DEFAULT_SYNC_METADATA,
+    DEFAULT_SYNC_STATISTICS,
+    SYNC_META_LAST_STATS_TS,
     CONF_TABLE,
     DEFAULT_AUTO_SYNC_ENABLED,
     DEFAULT_AUTO_SYNC_INTERVAL_MINUTES,
@@ -207,6 +211,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         filename: str | None = None,
         error: str | None = None,
         metadata: dict | None = None,
+        statistics: dict | None = None,
     ) -> None:
         """Record one sync run for Activity/Logbook and automations."""
         sync_meta = entry.runtime_data.sync_meta
@@ -275,6 +280,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "filename": filename,
                 "error": error,
                 "metadata": metadata,
+                "statistics": statistics,
             },
         )
 
@@ -363,6 +369,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.warning("Metadata sync failed: %s", err)
                 metadata_result = {"tables": {}, "errors": {"all": str(err)}}
 
+        # Long-term statistics: incremental, isolated like metadata.
+        statistics_result = None
+        if opts.get(CONF_SYNC_STATISTICS, DEFAULT_SYNC_STATISTICS):
+            try:
+                from .long_term_stats import run_statistics_sync
+
+                sync_meta = entry.runtime_data.sync_meta
+                last_stats_ts = sync_meta.get(SYNC_META_LAST_STATS_TS)
+                since = (
+                    None
+                    if last_stats_ts is None
+                    else float(last_stats_ts) - DEFAULT_STATS_LOOKBACK_HOURS * 3600
+                )
+                statistics_result = await run_statistics_sync(request, since)
+                if statistics_result["max_start_ts"] is not None:
+                    sync_meta[SYNC_META_LAST_STATS_TS] = max(
+                        float(last_stats_ts or 0), statistics_result["max_start_ts"]
+                    )
+                    await store.async_save(sync_meta)
+            except Exception as err:  # pylint: disable=broad-except
+                _LOGGER.warning("Statistics sync failed: %s", err)
+                statistics_result = {"rows": 0, "error": str(err)}
+
         _LOGGER.info("Starting hass_databricks sync service")
         try:
             result = await run_sync_pipeline(request)
@@ -390,6 +419,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 last_success_ts=sync_meta.get(SYNC_META_LAST_SUCCESS_TS),
                 error=str(err),
                 metadata=metadata_result,
+                statistics=statistics_result,
             )
             raise
 
@@ -421,6 +451,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             rows=int(result["rows"]),
             filename=str(result["filename"]),
             metadata=metadata_result,
+            statistics=statistics_result,
         )
 
     entry.runtime_data.sync_func = _run_sync

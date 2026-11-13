@@ -14,6 +14,7 @@ SYNC_META_LAST_FILENAME = "last_filename"
 SYNC_META_LAST_TARGET = "last_target"
 SYNC_META_LAST_TRIGGER = "last_trigger"
 SYNC_META_LAST_SINCE_TS = "last_since_ts"
+SYNC_META_LAST_STATS_TS = "last_stats_start_ts"
 DEFAULT_INCREMENTAL_LOOKBACK_MINUTES = 10
 
 # Databricks connection credentials (stored in config entry data)
@@ -37,6 +38,7 @@ CONF_HOT_COPY_DB = "hot_copy_db"
 CONF_AUTO_SYNC_ENABLED = "auto_sync_enabled"
 CONF_AUTO_SYNC_INTERVAL_MINUTES = "auto_sync_interval_minutes"
 CONF_SYNC_METADATA = "sync_metadata"
+CONF_SYNC_STATISTICS = "sync_statistics"
 
 DEFAULT_DB_FILENAME = "home-assistant_v2.db"
 DEFAULT_ENTITY_LIKE = "sensor.%"
@@ -45,6 +47,9 @@ DEFAULT_LOCAL_PATH = "/tmp/"
 DEFAULT_AUTO_SYNC_ENABLED = True
 DEFAULT_AUTO_SYNC_INTERVAL_MINUTES = 60
 DEFAULT_SYNC_METADATA = True
+DEFAULT_SYNC_STATISTICS = True
+# Hourly statistics can be recomputed/adjusted shortly after being written.
+DEFAULT_STATS_LOOKBACK_HOURS = 24
 
 # Parallel updates
 PARALLEL_UPDATES = 1

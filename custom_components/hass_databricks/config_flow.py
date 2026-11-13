@@ -12,6 +12,8 @@ from .const import (
     CONF_ACCESS_TOKEN,
     CONF_AUTO_SYNC_ENABLED,
     CONF_SYNC_METADATA,
+    CONF_SYNC_STATISTICS,
+    DEFAULT_SYNC_STATISTICS,
     DEFAULT_SYNC_METADATA,
     CONF_AUTO_SYNC_INTERVAL_MINUTES,
     CONF_CATALOG,
@@ -236,6 +238,10 @@ class HassDataBricksOptionsFlow(config_entries.OptionsFlowWithConfigEntry):
                 vol.Optional(
                     CONF_SYNC_METADATA,
                     default=current.get(CONF_SYNC_METADATA, DEFAULT_SYNC_METADATA),
+                ): bool,
+                vol.Optional(
+                    CONF_SYNC_STATISTICS,
+                    default=current.get(CONF_SYNC_STATISTICS, DEFAULT_SYNC_STATISTICS),
                 ): bool,
                 vol.Optional(
                     CONF_AUTO_SYNC_ENABLED,
