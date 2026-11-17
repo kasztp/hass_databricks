@@ -141,6 +141,26 @@ finds no new rows. The per-table row counts or errors are included as `metadata`
 
 Requires Home Assistant 2024.9 or newer.
 
+### Long-Term Statistics
+
+With option **Sync long-term statistics (hourly history)** (on by default) the integration also uploads
+Home Assistant's long-term statistics (the recorder's hourly `statistics` table) to
+`<catalog>.<schema>.ha_statistics`. Unlike raw states, Home Assistant keeps these indefinitely, so the
+**first run uploads all available history**, which can fill gaps left by raw-state purging or outages.
+
+| Column | Meaning |
+|---|---|
+| `statistic_id` | entity or statistic id |
+| `start_ts` | start of the hour (UTC timestamp) |
+| `mean`, `min`, `max` | for measurement sensors |
+| `sum`, `state`, `last_reset_ts` | for total/total_increasing (energy) sensors |
+| `unit`, `source` | unit of measurement and statistics source |
+
+Later runs are incremental: only rows with `start_ts >= last uploaded hour - 24 hours` are read (hourly
+rows can be adjusted shortly after being written) and MERGEd on `(statistic_id, start_ts)`, so re-runs
+never create duplicates. A statistics failure never fails the sensor sync; the result is in the
+`statistics` field of the `hass_databricks_sync_result` event.
+
 ### Incremental Sync Behavior
 
 After the first successful run, the integration stores the last successful source timestamp.
