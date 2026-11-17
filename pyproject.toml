@@ -9,11 +9,11 @@ dependencies = []
 
 [project.optional-dependencies]
 test = [
-	"pytest>=8.3.3",
-	"pylint>=3.3.1",
-	"pytest-cov>=6.0.0",
+	"pytest>=9.0.3",
+	"pylint>=4.1.4",
+	"pytest-cov>=7.1.0",
 	"homeassistant>=2024.9.0",
-	"uv>=0.11.6",
+	"uv>=0.13.4",
 ]
 
 [build-system]
@@ -29,7 +29,7 @@ extend-exclude = ["notebooks/*.ipynb"]
 [tool.uv]
 override-dependencies = [
     "pillow>=12.2.0",
-    "pyjwt>=2.12.0",
+    "pyjwt>=2.15.0",
     "orjson>=3.11.0",
 ]
 
