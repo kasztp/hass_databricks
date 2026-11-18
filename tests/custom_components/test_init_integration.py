@@ -646,3 +646,15 @@ def test_statistics_skipped_when_option_off(statistics_sync):
     _, raised = _run_handler(_build_entry(), _OK, {CONF_SYNC_STATISTICS: False})
     assert not raised
     statistics_sync.assert_not_awaited()
+
+
+def test_extras_summary_reports_counts_and_failures():
+    from custom_components.hass_databricks import _extras_summary
+
+    assert _extras_summary(None, None) == ""
+    ok = _extras_summary({"tables": {"a": 1, "b": 2}, "errors": {}}, {"rows": 2010801})
+    assert ok == ", 2,010,801 statistics, 2 metadata tables"
+    bad = _extras_summary(
+        {"tables": {"a": 1}, "errors": {"b": "boom"}}, {"rows": 0, "error": "x"}
+    )
+    assert bad == ", statistics failed, 1 metadata tables, 1 failed"
