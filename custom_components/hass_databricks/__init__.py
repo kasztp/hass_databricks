@@ -152,6 +152,20 @@ async def async_test_databricks_connection(
             await session.close()
 
 
+def _extras_summary(metadata: dict | None, statistics: dict | None) -> str:
+    """Counts (never values) of the statistics/metadata syncs for the Activity line."""
+    parts = []
+    if statistics is not None:
+        if statistics.get("error"):
+            parts.append("statistics failed")
+        else:
+            parts.append(f"{statistics.get('rows', 0):,} statistics")
+    if metadata is not None:
+        ok, bad = len(metadata.get("tables") or {}), len(metadata.get("errors") or {})
+        parts.append(f"{ok} metadata tables" + (f", {bad} failed" if bad else ""))
+    return "".join(f", {p}" for p in parts)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up hass_databricks from a config entry."""
     # Test connection before completing setup
@@ -248,12 +262,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.info("hass_databricks sync reconnected and operational")
                 sync_meta[SYNC_META_AVAILABLE] = True
 
+        extras = _extras_summary(metadata, statistics)
         if success:
-            message = f"Sync succeeded ({rows} rows) -> {target}"
+            message = f"Sync succeeded ({rows} rows{extras}) -> {target}"
             if filename:
                 message = f"{message} ({filename})"
         else:
-            message = f"Sync failed -> {target}: {error or 'unknown error'}"
+            message = f"Sync failed -> {target}: {error or 'unknown error'}{extras}"
 
         await hass.services.async_call(
             "logbook",
